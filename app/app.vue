@@ -1,12 +1,15 @@
 <template>
   <div class="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-    <NuxtPage />
+    <Sidebar />
+    <main class="ml-64 transition-all duration-300">
+      <NuxtPage />
+    </main>
     <ToastContainer />
   </div>
 </template>
 
 <script setup lang="ts">
-// Global app wrapper with dark theme background
+// Global app wrapper with sidebar layout
 </script>
 
 <style>
