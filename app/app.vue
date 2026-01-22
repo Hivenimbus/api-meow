@@ -1,7 +1,12 @@
 <template>
   <div class="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-    <Sidebar />
-    <main class="ml-64 transition-all duration-300">
+    <Sidebar ref="sidebarRef" />
+    <main 
+      :class="[
+        'transition-all duration-300',
+        sidebarRef?.isCollapsed ? 'ml-20' : 'ml-64'
+      ]"
+    >
       <NuxtPage />
     </main>
     <ToastContainer />
@@ -9,7 +14,10 @@
 </template>
 
 <script setup lang="ts">
-// Global app wrapper with sidebar layout
+import { ref } from 'vue'
+import Sidebar from '~/components/Sidebar.vue'
+
+const sidebarRef = ref<InstanceType<typeof Sidebar> | null>(null)
 </script>
 
 <style>

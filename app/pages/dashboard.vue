@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen p-6 sm:p-8 lg:p-12 max-w-7xl mx-auto">
+  <div class="min-h-screen p-6 sm:p-8 lg:p-12 w-full">
     <!-- Header -->
     <header class="mb-12">
       <div class="flex flex-col md:flex-row md:items-end justify-between gap-6">
@@ -24,9 +24,9 @@
       </div>
     </header>
 
-    <!-- Search Bar -->
-    <div class="mb-6">
-      <div class="relative max-w-md">
+    <!-- Search and Filter Bar -->
+    <div class="flex flex-col sm:flex-row gap-4 mb-6">
+      <div class="relative flex-1 max-w-md">
         <svg
           class="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400"
           fill="none"
@@ -41,6 +41,20 @@
           placeholder="Buscar instância..."
           class="w-full pl-12 pr-4 py-3 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 transition-all"
         />
+      </div>
+      
+      <!-- Tag Filter -->
+      <div class="relative">
+        <select
+          v-model="selectedTagFilter"
+          class="appearance-none px-4 py-3 pr-10 bg-slate-800/50 border border-slate-700/50 rounded-xl text-white focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 transition-all cursor-pointer"
+        >
+          <option value="">Todas as etiquetas</option>
+          <option v-for="tag in tags" :key="tag.id" :value="tag.id">{{ tag.name }}</option>
+        </select>
+        <svg class="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+        </svg>
       </div>
     </div>
 
@@ -95,6 +109,7 @@
         :instance="instance"
         @connect="handleConnect(instance)"
         @delete="openDeleteModal(instance)"
+        @settings="openSettingsModal(instance)"
       />
     </div>
 
@@ -135,6 +150,17 @@
             class="w-full px-4 py-3 bg-slate-900/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 transition-all"
             required
           />
+        </div>
+        
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-2">Etiqueta (opcional)</label>
+          <select
+            v-model="newInstance.tagId"
+            class="w-full px-4 py-3 bg-slate-900/50 border border-slate-700/50 rounded-xl text-white focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 transition-all cursor-pointer"
+          >
+            <option value="">Sem etiqueta</option>
+            <option v-for="tag in tags" :key="tag.id" :value="tag.id">{{ tag.name }}</option>
+          </select>
         </div>
       </form>
       <template #footer>
@@ -214,41 +240,133 @@
         </div>
       </template>
     </Modal>
+
+    <!-- Instance Settings Modal -->
+    <Modal v-model="showSettingsModal" :title="instanceToEdit?.name + ' - Configurações'" size="md">
+      <div v-if="instanceToEdit" class="space-y-6">
+        <!-- Ignore Groups -->
+        <div class="flex items-center justify-between p-4 bg-slate-900/50 rounded-xl border border-slate-700/50">
+          <div>
+            <h4 class="text-white font-medium">Ignorar Grupos</h4>
+            <p class="text-slate-400 text-sm">Não processar mensagens de grupos</p>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input 
+              type="checkbox" 
+              v-model="instanceToEdit.settings.ignoreGroups" 
+              class="sr-only peer"
+            />
+            <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+          </label>
+        </div>
+
+        <!-- Webhook URL -->
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-2">Webhook URL</label>
+          <input
+            v-model="instanceToEdit.settings.webhookUrl"
+            type="url"
+            placeholder="https://seu-servidor.com/webhook"
+            class="w-full px-4 py-3 bg-slate-900/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+          />
+        </div>
+
+        <!-- Webhook Events -->
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-3">Eventos do Webhook</label>
+          <div class="space-y-2">
+            <label class="flex items-center gap-3 p-3 bg-slate-900/50 rounded-xl border border-slate-700/50 cursor-pointer hover:border-slate-600/50 transition-all">
+              <input 
+                type="checkbox" 
+                v-model="instanceToEdit.settings.webhookEvents.receiveMessages"
+                class="w-4 h-4 text-emerald-500 bg-slate-700 border-slate-600 rounded focus:ring-emerald-500/20 focus:ring-2"
+              />
+              <div>
+                <span class="text-white font-medium">Receber Mensagens</span>
+                <p class="text-slate-400 text-xs">Receber notificações quando novas mensagens chegarem</p>
+              </div>
+            </label>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex gap-3 justify-end">
+          <button
+            @click="showSettingsModal = false"
+            class="px-4 py-2 text-slate-300 hover:text-white transition-colors"
+          >
+            Fechar
+          </button>
+          <button
+            @click="saveSettings"
+            class="px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-medium rounded-xl hover:from-emerald-600 hover:to-teal-600 transition-all"
+          >
+            Salvar
+          </button>
+        </div>
+      </template>
+    </Modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useToast } from '~/composables/useToast'
+import { useTags } from '~/composables/useTags'
 import type { Instance } from '~/components/InstanceCard.vue'
 
 const { success, error } = useToast()
+const { tags } = useTags()
+
+// Default settings factory
+const createDefaultSettings = () => ({
+  ignoreGroups: true,
+  webhookUrl: '',
+  webhookEvents: {
+    receiveMessages: true
+  }
+})
 
 // State
 const searchQuery = ref('')
+const selectedTagFilter = ref('')
 const showAddModal = ref(false)
 const showDeleteModal = ref(false)
 const showConnectModal = ref(false)
+const showSettingsModal = ref(false)
 const instanceToDelete = ref<Instance | null>(null)
 const instanceToConnect = ref<Instance | null>(null)
+const instanceToEdit = ref<Instance | null>(null)
 
 const newInstance = ref({
-  name: ''
+  name: '',
+  tagId: ''
 })
 
 // Mock data
 const instances = ref<Instance[]>([
-  { id: '1', name: 'Vendas', status: 'connected', phoneNumber: '+55 11 99999-0001' },
-  { id: '2', name: 'Suporte', status: 'disconnected' },
-  { id: '3', name: 'Marketing', status: 'connecting' },
-  { id: '4', name: 'Financeiro', status: 'connected', phoneNumber: '+55 11 99999-0004' },
+  { id: '1', name: 'Vendas', status: 'connected', phoneNumber: '+55 11 99999-0001', tagId: '1', settings: createDefaultSettings() },
+  { id: '2', name: 'Suporte', status: 'disconnected', tagId: '2', settings: createDefaultSettings() },
+  { id: '3', name: 'Marketing', status: 'connecting', tagId: '3', settings: createDefaultSettings() },
+  { id: '4', name: 'Financeiro', status: 'connected', phoneNumber: '+55 11 99999-0004', tagId: '4', settings: createDefaultSettings() },
 ])
 
 // Computed
 const filteredInstances = computed(() => {
-  if (!searchQuery.value.trim()) return instances.value
-  const query = searchQuery.value.toLowerCase()
-  return instances.value.filter(i => i.name.toLowerCase().includes(query))
+  let result = instances.value
+  
+  // Filter by tag
+  if (selectedTagFilter.value) {
+    result = result.filter(i => i.tagId === selectedTagFilter.value)
+  }
+  
+  // Filter by search
+  if (searchQuery.value.trim()) {
+    const query = searchQuery.value.toLowerCase()
+    result = result.filter(i => i.name.toLowerCase().includes(query))
+  }
+  
+  return result
 })
 
 const connectedCount = computed(() => 
@@ -266,13 +384,16 @@ const handleAddInstance = () => {
   const instance: Instance = {
     id: Date.now().toString(),
     name: newInstance.value.name,
-    status: 'disconnected'
+    status: 'disconnected',
+    tagId: newInstance.value.tagId || undefined,
+    settings: createDefaultSettings()
   }
   
   instances.value.push(instance)
   success(`Instância "${instance.name}" criada com sucesso!`)
   
   newInstance.value.name = ''
+  newInstance.value.tagId = ''
   showAddModal.value = false
 }
 
@@ -295,6 +416,17 @@ const handleDeleteInstance = () => {
 const handleConnect = (instance: Instance) => {
   instanceToConnect.value = instance
   showConnectModal.value = true
+}
+
+const openSettingsModal = (instance: Instance) => {
+  instanceToEdit.value = instance
+  showSettingsModal.value = true
+}
+
+const saveSettings = () => {
+  if (!instanceToEdit.value) return
+  success(`Configurações da instância "${instanceToEdit.value.name}" salvas!`)
+  showSettingsModal.value = false
 }
 
 const simulateConnect = () => {

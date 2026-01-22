@@ -1,5 +1,5 @@
 <template>
-  <div class="group relative bg-slate-800/50 backdrop-blur-sm rounded-2xl border border-slate-700/50 p-5 hover:border-slate-600/50 hover:bg-slate-800/70 transition-all duration-300 hover:shadow-xl hover:shadow-emerald-500/5">
+  <div @click="$emit('settings')" class="group relative bg-slate-800/50 backdrop-blur-sm rounded-2xl border border-slate-700/50 p-5 hover:border-slate-600/50 hover:bg-slate-800/70 transition-all duration-300 hover:shadow-xl hover:shadow-emerald-500/5 cursor-pointer">
     <!-- Status Indicator Glow -->
     <div
       :class="[
@@ -43,8 +43,9 @@
       </button>
     </div>
     
-    <!-- Status Badge -->
-    <div class="mb-4">
+    <!-- Badges Row -->
+    <div class="flex flex-wrap items-center gap-2 mb-4">
+      <!-- Status Badge -->
       <span
         :class="[
           'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium',
@@ -62,6 +63,16 @@
           ]"
         />
         {{ statusLabel }}
+      </span>
+      
+      <!-- Tag Badge -->
+      <span
+        v-if="tag"
+        class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border"
+        :style="{ backgroundColor: tag.color + '15', borderColor: tag.color + '30', color: tag.color }"
+      >
+        <span class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: tag.color }" />
+        {{ tag.name }}
       </span>
     </div>
     
@@ -89,12 +100,23 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useTags } from '~/composables/useTags'
+
+export interface InstanceSettings {
+  ignoreGroups: boolean
+  webhookUrl: string
+  webhookEvents: {
+    receiveMessages: boolean
+  }
+}
 
 export interface Instance {
   id: string
   name: string
   status: 'connected' | 'disconnected' | 'connecting'
   phoneNumber?: string
+  tagId?: string
+  settings: InstanceSettings
 }
 
 const props = defineProps<{
@@ -104,7 +126,12 @@ const props = defineProps<{
 defineEmits<{
   connect: []
   delete: []
+  settings: []
 }>()
+
+const { getTagById } = useTags()
+
+const tag = computed(() => props.instance.tagId ? getTagById(props.instance.tagId) : null)
 
 const statusLabel = computed(() => {
   const labels = {
@@ -115,3 +142,4 @@ const statusLabel = computed(() => {
   return labels[props.instance.status]
 })
 </script>
+
