@@ -153,6 +153,16 @@
         </div>
         
         <div>
+          <label class="block text-sm font-medium text-slate-300 mb-2">Webhook URL (opcional)</label>
+          <input
+            v-model="newInstance.webhookUrl"
+            type="url"
+            placeholder="https://seu-servidor.com/webhook"
+            class="w-full px-4 py-3 bg-slate-900/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+          />
+        </div>
+
+        <div>
           <label class="block text-sm font-medium text-slate-300 mb-2">Etiqueta (opcional)</label>
           <select
             v-model="newInstance.tagId"
@@ -319,9 +329,9 @@ const { success, error } = useToast()
 const { tags } = useTags()
 
 // Default settings factory
-const createDefaultSettings = () => ({
+const createDefaultSettings = (webhookUrl = '') => ({
   ignoreGroups: true,
-  webhookUrl: '',
+  webhookUrl: webhookUrl,
   webhookEvents: {
     receiveMessages: true
   }
@@ -340,7 +350,8 @@ const instanceToEdit = ref<Instance | null>(null)
 
 const newInstance = ref({
   name: '',
-  tagId: ''
+  tagId: '',
+  webhookUrl: ''
 })
 
 // Mock data
@@ -386,7 +397,7 @@ const handleAddInstance = () => {
     name: newInstance.value.name,
     status: 'disconnected',
     tagId: newInstance.value.tagId || undefined,
-    settings: createDefaultSettings()
+    settings: createDefaultSettings(newInstance.value.webhookUrl)
   }
   
   instances.value.push(instance)
@@ -394,6 +405,7 @@ const handleAddInstance = () => {
   
   newInstance.value.name = ''
   newInstance.value.tagId = ''
+  newInstance.value.webhookUrl = ''
   showAddModal.value = false
 }
 

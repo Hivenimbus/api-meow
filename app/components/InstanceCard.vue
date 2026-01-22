@@ -78,7 +78,7 @@
     
     <!-- Connect Button -->
     <button
-      @click="$emit('connect')"
+      @click.stop="$emit('connect')"
       :disabled="instance.status === 'connected'"
       :class="[
         'w-full py-2.5 px-4 rounded-xl font-medium text-sm transition-all duration-300 flex items-center justify-center gap-2',
