@@ -33,8 +33,8 @@
       
       <!-- Actions Menu -->
       <button
-        @click="$emit('delete')"
-        class="p-2 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
+        @click.stop="$emit('delete')"
+        class="relative z-10 p-2 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover:opacity-100"
         title="Excluir instância"
       >
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

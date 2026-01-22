@@ -1,20 +1,20 @@
 <template>
-  <div class="min-h-screen p-4 sm:p-6 lg:p-8">
+  <div class="min-h-screen p-6 sm:p-8 lg:p-12 max-w-7xl mx-auto">
     <!-- Header -->
-    <header class="mb-8">
-      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <header class="mb-12">
+      <div class="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div>
-          <h1 class="text-3xl sm:text-4xl font-bold text-white mb-2">
+          <h1 class="text-4xl font-bold text-white mb-3 tracking-tight">
             <span class="bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">
               WhatsApp API
             </span>
           </h1>
-          <p class="text-slate-400">Gerencie suas instâncias do WhatsApp</p>
+          <p class="text-slate-400 text-lg">Gerencie suas instâncias do WhatsApp</p>
         </div>
         
         <button
           @click="showAddModal = true"
-          class="inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-medium rounded-xl hover:from-emerald-600 hover:to-teal-600 transition-all duration-300 shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 hover:scale-105"
+          class="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-medium rounded-xl hover:from-emerald-600 hover:to-teal-600 transition-all duration-300 shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 hover:-translate-y-0.5"
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
