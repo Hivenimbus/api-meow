@@ -13,20 +13,29 @@ import (
 
 const createInstance = `-- name: CreateInstance :one
 INSERT INTO instances (
-    name, webhook_url
+    name, webhook_url, tag_id, ignore_groups, receive_messages
 ) VALUES (
-    $1, $2
+    $1, $2, $3, $4, $5
 )
 RETURNING id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at
 `
 
 type CreateInstanceParams struct {
-	Name       string
-	WebhookUrl pgtype.Text
+	Name            string
+	WebhookUrl      pgtype.Text
+	TagID           pgtype.Text
+	IgnoreGroups    pgtype.Bool
+	ReceiveMessages pgtype.Bool
 }
 
 func (q *Queries) CreateInstance(ctx context.Context, arg CreateInstanceParams) (Instance, error) {
-	row := q.db.QueryRow(ctx, createInstance, arg.Name, arg.WebhookUrl)
+	row := q.db.QueryRow(ctx, createInstance,
+		arg.Name,
+		arg.WebhookUrl,
+		arg.TagID,
+		arg.IgnoreGroups,
+		arg.ReceiveMessages,
+	)
 	var i Instance
 	err := row.Scan(
 		&i.ID,
@@ -79,6 +88,16 @@ func (q *Queries) DeleteInstance(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const deleteTag = `-- name: DeleteTag :exec
+DELETE FROM tags
+WHERE id = $1
+`
+
+func (q *Queries) DeleteTag(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteTag, id)
+	return err
+}
+
 const getInstance = `-- name: GetInstance :one
 SELECT id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at FROM instances
 WHERE id = $1 LIMIT 1
@@ -98,6 +117,23 @@ func (q *Queries) GetInstance(ctx context.Context, id pgtype.UUID) (Instance, er
 		&i.ReceiveMessages,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getTag = `-- name: GetTag :one
+SELECT id, name, color, created_at FROM tags
+WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetTag(ctx context.Context, id pgtype.UUID) (Tag, error) {
+	row := q.db.QueryRow(ctx, getTag, id)
+	var i Tag
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Color,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -168,20 +204,29 @@ func (q *Queries) ListTags(ctx context.Context) ([]Tag, error) {
 	return items, nil
 }
 
-const updateInstanceStatus = `-- name: UpdateInstanceStatus :one
+const updateInstanceSettings = `-- name: UpdateInstanceSettings :one
 UPDATE instances
-SET status = $2, updated_at = NOW()
+SET webhook_url = $2, ignore_groups = $3, receive_messages = $4, tag_id = $5, updated_at = NOW()
 WHERE id = $1
 RETURNING id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at
 `
 
-type UpdateInstanceStatusParams struct {
-	ID     pgtype.UUID
-	Status string
+type UpdateInstanceSettingsParams struct {
+	ID              pgtype.UUID
+	WebhookUrl      pgtype.Text
+	IgnoreGroups    pgtype.Bool
+	ReceiveMessages pgtype.Bool
+	TagID           pgtype.Text
 }
 
-func (q *Queries) UpdateInstanceStatus(ctx context.Context, arg UpdateInstanceStatusParams) (Instance, error) {
-	row := q.db.QueryRow(ctx, updateInstanceStatus, arg.ID, arg.Status)
+func (q *Queries) UpdateInstanceSettings(ctx context.Context, arg UpdateInstanceSettingsParams) (Instance, error) {
+	row := q.db.QueryRow(ctx, updateInstanceSettings,
+		arg.ID,
+		arg.WebhookUrl,
+		arg.IgnoreGroups,
+		arg.ReceiveMessages,
+		arg.TagID,
+	)
 	var i Instance
 	err := row.Scan(
 		&i.ID,
@@ -194,6 +239,62 @@ func (q *Queries) UpdateInstanceStatus(ctx context.Context, arg UpdateInstanceSt
 		&i.ReceiveMessages,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateInstanceStatus = `-- name: UpdateInstanceStatus :one
+UPDATE instances
+SET status = $2, phone_number = $3, updated_at = NOW()
+WHERE id = $1
+RETURNING id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at
+`
+
+type UpdateInstanceStatusParams struct {
+	ID          pgtype.UUID
+	Status      string
+	PhoneNumber pgtype.Text
+}
+
+func (q *Queries) UpdateInstanceStatus(ctx context.Context, arg UpdateInstanceStatusParams) (Instance, error) {
+	row := q.db.QueryRow(ctx, updateInstanceStatus, arg.ID, arg.Status, arg.PhoneNumber)
+	var i Instance
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Status,
+		&i.PhoneNumber,
+		&i.TagID,
+		&i.IgnoreGroups,
+		&i.WebhookUrl,
+		&i.ReceiveMessages,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateTag = `-- name: UpdateTag :one
+UPDATE tags
+SET name = $2, color = $3
+WHERE id = $1
+RETURNING id, name, color, created_at
+`
+
+type UpdateTagParams struct {
+	ID    pgtype.UUID
+	Name  string
+	Color string
+}
+
+func (q *Queries) UpdateTag(ctx context.Context, arg UpdateTagParams) (Tag, error) {
+	row := q.db.QueryRow(ctx, updateTag, arg.ID, arg.Name, arg.Color)
+	var i Tag
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Color,
+		&i.CreatedAt,
 	)
 	return i, err
 }

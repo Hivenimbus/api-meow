@@ -90,6 +90,20 @@
         <span v-if="!isCollapsed" class="font-medium">Documentação</span>
       </a>
 
+      <!-- Logout Button -->
+      <button
+        @click="handleLogout"
+        :class="[
+          'w-full flex items-center gap-3 py-3 rounded-xl text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-all duration-200',
+          isCollapsed ? 'justify-center px-0' : 'px-4'
+        ]"
+      >
+        <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+        </svg>
+        <span v-if="!isCollapsed" class="font-medium">Sair</span>
+      </button>
+
       <!-- Collapse Toggle -->
       <button
         @click="toggleCollapse"
@@ -113,8 +127,11 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useAuth } from '~/composables/useAuth'
 
 const route = useRoute()
+const router = useRouter()
+const { logout } = useAuth()
 
 const isCollapsed = ref(false)
 
@@ -124,6 +141,12 @@ const toggleCollapse = () => {
   isCollapsed.value = !isCollapsed.value
 }
 
+const handleLogout = () => {
+  logout()
+  router.push('/login')
+}
+
 // Expose isCollapsed for parent to adjust main content margin
 defineExpose({ isCollapsed })
 </script>
+

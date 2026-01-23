@@ -223,14 +223,15 @@ import { ref, computed } from 'vue'
 import { useTags, type Tag } from '~/composables/useTags'
 import { useToast } from '~/composables/useToast'
 
-const { tags, availableColors, addTag, updateTag, deleteTag } = useTags()
-const { success } = useToast()
+const { tags, availableColors, addTag, updateTag, deleteTag, loading } = useTags()
+const { success, error } = useToast()
 
 const searchQuery = ref('')
 const showTagModal = ref(false)
 const showDeleteModal = ref(false)
 const editingTag = ref<Tag | null>(null)
 const tagToDelete = ref<Tag | null>(null)
+const saving = ref(false)
 
 const tagForm = ref({
   name: '',
@@ -260,28 +261,43 @@ const openDeleteModal = (tag: Tag) => {
   showDeleteModal.value = true
 }
 
-const handleSaveTag = () => {
+const handleSaveTag = async () => {
   if (!tagForm.value.name.trim()) return
   
-  if (editingTag.value) {
-    updateTag(editingTag.value.id, tagForm.value.name, tagForm.value.color)
-    success(`Etiqueta "${tagForm.value.name}" atualizada!`)
-  } else {
-    addTag(tagForm.value.name, tagForm.value.color)
-    success(`Etiqueta "${tagForm.value.name}" criada!`)
+  saving.value = true
+  try {
+    if (editingTag.value) {
+      await updateTag(editingTag.value.id, tagForm.value.name, tagForm.value.color)
+      success(`Etiqueta "${tagForm.value.name}" atualizada!`)
+    } else {
+      await addTag(tagForm.value.name, tagForm.value.color)
+      success(`Etiqueta "${tagForm.value.name}" criada!`)
+    }
+    showTagModal.value = false
+  } catch (e) {
+    error('Erro ao salvar etiqueta')
+    console.error(e)
+  } finally {
+    saving.value = false
   }
-  
-  showTagModal.value = false
 }
 
-const handleDeleteTag = () => {
+const handleDeleteTag = async () => {
   if (!tagToDelete.value) return
   
-  const name = tagToDelete.value.name
-  deleteTag(tagToDelete.value.id)
-  success(`Etiqueta "${name}" excluída!`)
-  
-  tagToDelete.value = null
-  showDeleteModal.value = false
+  saving.value = true
+  try {
+    const name = tagToDelete.value.name
+    await deleteTag(tagToDelete.value.id)
+    success(`Etiqueta "${name}" excluída!`)
+    
+    tagToDelete.value = null
+    showDeleteModal.value = false
+  } catch (e) {
+    error('Erro ao excluir etiqueta')
+    console.error(e)
+  } finally {
+    saving.value = false
+  }
 }
 </script>

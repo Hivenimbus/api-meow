@@ -1,4 +1,5 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
+import { useApi, type ApiTag } from './useApi'
 
 export interface Tag {
     id: string
@@ -6,12 +7,9 @@ export interface Tag {
     color: string
 }
 
-const tags = ref<Tag[]>([
-    { id: '1', name: 'Vendas', color: '#10b981' },
-    { id: '2', name: 'Suporte', color: '#3b82f6' },
-    { id: '3', name: 'Marketing', color: '#f59e0b' },
-    { id: '4', name: 'Financeiro', color: '#8b5cf6' },
-])
+const tags = ref<Tag[]>([])
+const loading = ref(false)
+const initialized = ref(false)
 
 const availableColors = [
     '#10b981', // emerald
@@ -25,36 +23,80 @@ const availableColors = [
 ]
 
 export const useTags = () => {
-    const addTag = (name: string, color: string) => {
-        const tag: Tag = {
-            id: Date.now().toString(),
-            name,
-            color
+    const api = useApi()
+
+    const fetchTags = async () => {
+        if (loading.value) return
+        loading.value = true
+        try {
+            const data = await api.fetchTags()
+            tags.value = data.map(t => ({
+                id: t.id,
+                name: t.name,
+                color: t.color
+            }))
+            initialized.value = true
+        } catch (e) {
+            console.error('Failed to fetch tags:', e)
+        } finally {
+            loading.value = false
         }
-        tags.value.push(tag)
-        return tag
     }
 
-    const updateTag = (id: string, name: string, color: string) => {
-        const tag = tags.value.find(t => t.id === id)
-        if (tag) {
-            tag.name = name
-            tag.color = color
+    const addTag = async (name: string, color: string) => {
+        try {
+            const newTag = await api.createTag(name, color)
+            tags.value.push({
+                id: newTag.id,
+                name: newTag.name,
+                color: newTag.color
+            })
+            return newTag
+        } catch (e) {
+            console.error('Failed to create tag:', e)
+            throw e
         }
     }
 
-    const deleteTag = (id: string) => {
-        const index = tags.value.findIndex(t => t.id === id)
-        if (index > -1) {
-            tags.value.splice(index, 1)
+    const updateTag = async (id: string, name: string, color: string) => {
+        try {
+            const updated = await api.updateTag(id, name, color)
+            const tag = tags.value.find(t => t.id === id)
+            if (tag) {
+                tag.name = updated.name
+                tag.color = updated.color
+            }
+        } catch (e) {
+            console.error('Failed to update tag:', e)
+            throw e
+        }
+    }
+
+    const deleteTag = async (id: string) => {
+        try {
+            await api.deleteTag(id)
+            const index = tags.value.findIndex(t => t.id === id)
+            if (index > -1) {
+                tags.value.splice(index, 1)
+            }
+        } catch (e) {
+            console.error('Failed to delete tag:', e)
+            throw e
         }
     }
 
     const getTagById = (id: string) => tags.value.find(t => t.id === id)
 
+    // Initialize on first use
+    if (!initialized.value && !loading.value) {
+        fetchTags()
+    }
+
     return {
         tags,
+        loading,
         availableColors,
+        fetchTags,
         addTag,
         updateTag,
         deleteTag,

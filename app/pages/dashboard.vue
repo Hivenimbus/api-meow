@@ -58,85 +58,92 @@
       </div>
     </div>
 
-    <!-- Stats Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-      <div class="bg-slate-800/30 backdrop-blur-sm rounded-xl border border-slate-700/30 p-4">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-            <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <div>
-            <p class="text-2xl font-bold text-white">{{ connectedCount }}</p>
-            <p class="text-sm text-slate-400">Conectadas</p>
-          </div>
-        </div>
-      </div>
-      <div class="bg-slate-800/30 backdrop-blur-sm rounded-xl border border-slate-700/30 p-4">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-lg bg-slate-500/10 flex items-center justify-center">
-            <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3m8.293 8.293l1.414 1.414" />
-            </svg>
-          </div>
-          <div>
-            <p class="text-2xl font-bold text-white">{{ disconnectedCount }}</p>
-            <p class="text-sm text-slate-400">Desconectadas</p>
-          </div>
-        </div>
-      </div>
-      <div class="bg-slate-800/30 backdrop-blur-sm rounded-xl border border-slate-700/30 p-4">
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
-            <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-            </svg>
-          </div>
-          <div>
-            <p class="text-2xl font-bold text-white">{{ instances.length }}</p>
-            <p class="text-sm text-slate-400">Total</p>
-          </div>
-        </div>
-      </div>
+    <!-- Loading State -->
+    <div v-if="loading" class="flex items-center justify-center py-16">
+      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500"></div>
     </div>
 
-    <!-- Instances Grid -->
-    <div v-if="filteredInstances.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-      <InstanceCard
-        v-for="instance in filteredInstances"
-        :key="instance.id"
-        :instance="instance"
-        @connect="handleConnect(instance)"
-        @delete="openDeleteModal(instance)"
-        @settings="openSettingsModal(instance)"
-      />
-    </div>
-
-    <!-- Empty State -->
-    <div v-else class="flex flex-col items-center justify-center py-16">
-      <div class="w-20 h-20 rounded-full bg-slate-800/50 flex items-center justify-center mb-4">
-        <svg class="w-10 h-10 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-        </svg>
+    <template v-else>
+      <!-- Stats Cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+        <div class="bg-slate-800/30 backdrop-blur-sm rounded-xl border border-slate-700/30 p-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+              <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <div>
+              <p class="text-2xl font-bold text-white">{{ connectedCount }}</p>
+              <p class="text-sm text-slate-400">Conectadas</p>
+            </div>
+          </div>
+        </div>
+        <div class="bg-slate-800/30 backdrop-blur-sm rounded-xl border border-slate-700/30 p-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-slate-500/10 flex items-center justify-center">
+              <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3m8.293 8.293l1.414 1.414" />
+              </svg>
+            </div>
+            <div>
+              <p class="text-2xl font-bold text-white">{{ disconnectedCount }}</p>
+              <p class="text-sm text-slate-400">Desconectadas</p>
+            </div>
+          </div>
+        </div>
+        <div class="bg-slate-800/30 backdrop-blur-sm rounded-xl border border-slate-700/30 p-4">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+              <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+              </svg>
+            </div>
+            <div>
+              <p class="text-2xl font-bold text-white">{{ instances.length }}</p>
+              <p class="text-sm text-slate-400">Total</p>
+            </div>
+          </div>
+        </div>
       </div>
-      <h3 class="text-xl font-semibold text-white mb-2">
-        {{ searchQuery ? 'Nenhuma instância encontrada' : 'Nenhuma instância criada' }}
-      </h3>
-      <p class="text-slate-400 text-center max-w-md">
-        {{ searchQuery ? 'Tente buscar com outro termo.' : 'Crie sua primeira instância para começar a usar a API do WhatsApp.' }}
-      </p>
-      <button
-        v-if="!searchQuery"
-        @click="showAddModal = true"
-        class="mt-6 inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-medium rounded-xl hover:from-emerald-600 hover:to-teal-600 transition-all"
-      >
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-        </svg>
-        Criar Instância
-      </button>
-    </div>
+
+      <!-- Instances Grid -->
+      <div v-if="filteredInstances.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <InstanceCard
+          v-for="instance in filteredInstances"
+          :key="instance.id"
+          :instance="instance"
+          @connect="handleConnect(instance)"
+          @delete="openDeleteModal(instance)"
+          @settings="openSettingsModal(instance)"
+        />
+      </div>
+
+      <!-- Empty State -->
+      <div v-else class="flex flex-col items-center justify-center py-16">
+        <div class="w-20 h-20 rounded-full bg-slate-800/50 flex items-center justify-center mb-4">
+          <svg class="w-10 h-10 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
+        </div>
+        <h3 class="text-xl font-semibold text-white mb-2">
+          {{ searchQuery ? 'Nenhuma instância encontrada' : 'Nenhuma instância criada' }}
+        </h3>
+        <p class="text-slate-400 text-center max-w-md">
+          {{ searchQuery ? 'Tente buscar com outro termo.' : 'Crie sua primeira instância para começar a usar a API do WhatsApp.' }}
+        </p>
+        <button
+          v-if="!searchQuery"
+          @click="showAddModal = true"
+          class="mt-6 inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-medium rounded-xl hover:from-emerald-600 hover:to-teal-600 transition-all"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+          </svg>
+          Criar Instância
+        </button>
+      </div>
+    </template>
 
     <!-- Add Instance Modal -->
     <Modal v-model="showAddModal" title="Nova Instância" size="md">
@@ -183,10 +190,10 @@
           </button>
           <button
             @click="handleAddInstance"
-            :disabled="!newInstance.name.trim()"
+            :disabled="!newInstance.name.trim() || saving"
             class="px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-medium rounded-xl hover:from-emerald-600 hover:to-teal-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Criar Instância
+            {{ saving ? 'Criando...' : 'Criar Instância' }}
           </button>
         </div>
       </template>
@@ -215,9 +222,10 @@
           </button>
           <button
             @click="handleDeleteInstance"
-            class="px-5 py-2 bg-red-500 text-white font-medium rounded-xl hover:bg-red-600 transition-all"
+            :disabled="saving"
+            class="px-5 py-2 bg-red-500 text-white font-medium rounded-xl hover:bg-red-600 transition-all disabled:opacity-50"
           >
-            Excluir
+            {{ saving ? 'Excluindo...' : 'Excluir' }}
           </button>
         </div>
       </template>
@@ -243,9 +251,10 @@
         <div class="flex justify-center">
           <button
             @click="simulateConnect"
-            class="px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-medium rounded-xl hover:from-emerald-600 hover:to-teal-600 transition-all"
+            :disabled="saving"
+            class="px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-medium rounded-xl hover:from-emerald-600 hover:to-teal-600 transition-all disabled:opacity-50"
           >
-            Simular Conexão
+            {{ saving ? 'Conectando...' : 'Simular Conexão' }}
           </button>
         </div>
       </template>
@@ -263,7 +272,7 @@
           <label class="relative inline-flex items-center cursor-pointer">
             <input 
               type="checkbox" 
-              v-model="instanceToEdit.settings.ignoreGroups" 
+              v-model="editSettings.ignoreGroups" 
               class="sr-only peer"
             />
             <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
@@ -274,7 +283,7 @@
         <div>
           <label class="block text-sm font-medium text-slate-300 mb-2">Webhook URL</label>
           <input
-            v-model="instanceToEdit.settings.webhookUrl"
+            v-model="editSettings.webhookUrl"
             type="url"
             placeholder="https://seu-servidor.com/webhook"
             class="w-full px-4 py-3 bg-slate-900/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 transition-all"
@@ -288,7 +297,7 @@
             <label class="flex items-center gap-3 p-3 bg-slate-900/50 rounded-xl border border-slate-700/50 cursor-pointer hover:border-slate-600/50 transition-all">
               <input 
                 type="checkbox" 
-                v-model="instanceToEdit.settings.webhookEvents.receiveMessages"
+                v-model="editSettings.receiveMessages"
                 class="w-4 h-4 text-emerald-500 bg-slate-700 border-slate-600 rounded focus:ring-emerald-500/20 focus:ring-2"
               />
               <div>
@@ -297,6 +306,18 @@
               </div>
             </label>
           </div>
+        </div>
+
+        <!-- Tag -->
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-2">Etiqueta</label>
+          <select
+            v-model="editSettings.tagId"
+            class="w-full px-4 py-3 bg-slate-900/50 border border-slate-700/50 rounded-xl text-white focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 transition-all cursor-pointer"
+          >
+            <option value="">Sem etiqueta</option>
+            <option v-for="tag in tags" :key="tag.id" :value="tag.id">{{ tag.name }}</option>
+          </select>
         </div>
       </div>
       <template #footer>
@@ -309,9 +330,10 @@
           </button>
           <button
             @click="saveSettings"
-            class="px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-medium rounded-xl hover:from-emerald-600 hover:to-teal-600 transition-all"
+            :disabled="saving"
+            class="px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-medium rounded-xl hover:from-emerald-600 hover:to-teal-600 transition-all disabled:opacity-50"
           >
-            Salvar
+            {{ saving ? 'Salvando...' : 'Salvar' }}
           </button>
         </div>
       </template>
@@ -320,22 +342,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useToast } from '~/composables/useToast'
 import { useTags } from '~/composables/useTags'
+import { useApi } from '~/composables/useApi'
 import type { Instance } from '~/components/InstanceCard.vue'
 
 const { success, error } = useToast()
 const { tags } = useTags()
-
-// Default settings factory
-const createDefaultSettings = (webhookUrl = '') => ({
-  ignoreGroups: true,
-  webhookUrl: webhookUrl,
-  webhookEvents: {
-    receiveMessages: true
-  }
-})
+const api = useApi()
 
 // State
 const searchQuery = ref('')
@@ -347,6 +362,8 @@ const showSettingsModal = ref(false)
 const instanceToDelete = ref<Instance | null>(null)
 const instanceToConnect = ref<Instance | null>(null)
 const instanceToEdit = ref<Instance | null>(null)
+const loading = ref(true)
+const saving = ref(false)
 
 const newInstance = ref({
   name: '',
@@ -354,13 +371,46 @@ const newInstance = ref({
   webhookUrl: ''
 })
 
-// Mock data
-const instances = ref<Instance[]>([
-  { id: '1', name: 'Vendas', status: 'connected', phoneNumber: '+55 11 99999-0001', tagId: '1', settings: createDefaultSettings() },
-  { id: '2', name: 'Suporte', status: 'disconnected', tagId: '2', settings: createDefaultSettings() },
-  { id: '3', name: 'Marketing', status: 'connecting', tagId: '3', settings: createDefaultSettings() },
-  { id: '4', name: 'Financeiro', status: 'connected', phoneNumber: '+55 11 99999-0004', tagId: '4', settings: createDefaultSettings() },
-])
+const editSettings = ref({
+  ignoreGroups: true,
+  webhookUrl: '',
+  receiveMessages: true,
+  tagId: ''
+})
+
+// Instances from API
+const instances = ref<Instance[]>([])
+
+// Fetch instances on mount
+onMounted(async () => {
+  await fetchInstances()
+})
+
+const fetchInstances = async () => {
+  loading.value = true
+  try {
+    const data = await api.fetchInstances()
+    instances.value = data.map(i => ({
+      id: i.id,
+      name: i.name,
+      status: i.status as 'connected' | 'disconnected' | 'connecting',
+      phoneNumber: i.phoneNumber,
+      tagId: i.tagId,
+      settings: {
+        ignoreGroups: i.ignoreGroups,
+        webhookUrl: i.webhookUrl || '',
+        webhookEvents: {
+          receiveMessages: i.receiveMessages
+        }
+      }
+    }))
+  } catch (e) {
+    error('Erro ao carregar instâncias')
+    console.error(e)
+  } finally {
+    loading.value = false
+  }
+}
 
 // Computed
 const filteredInstances = computed(() => {
@@ -389,24 +439,44 @@ const disconnectedCount = computed(() =>
 )
 
 // Methods
-const handleAddInstance = () => {
+const handleAddInstance = async () => {
   if (!newInstance.value.name.trim()) return
   
-  const instance: Instance = {
-    id: Date.now().toString(),
-    name: newInstance.value.name,
-    status: 'disconnected',
-    tagId: newInstance.value.tagId || undefined,
-    settings: createDefaultSettings(newInstance.value.webhookUrl)
+  saving.value = true
+  try {
+    const created = await api.createInstance({
+      name: newInstance.value.name,
+      webhookUrl: newInstance.value.webhookUrl || undefined,
+      tagId: newInstance.value.tagId || undefined
+    })
+    
+    instances.value.unshift({
+      id: created.id,
+      name: created.name,
+      status: created.status as 'connected' | 'disconnected' | 'connecting',
+      phoneNumber: created.phoneNumber,
+      tagId: created.tagId,
+      settings: {
+        ignoreGroups: created.ignoreGroups,
+        webhookUrl: created.webhookUrl || '',
+        webhookEvents: {
+          receiveMessages: created.receiveMessages
+        }
+      }
+    })
+    
+    success(`Instância "${created.name}" criada com sucesso!`)
+    
+    newInstance.value.name = ''
+    newInstance.value.tagId = ''
+    newInstance.value.webhookUrl = ''
+    showAddModal.value = false
+  } catch (e) {
+    error('Erro ao criar instância')
+    console.error(e)
+  } finally {
+    saving.value = false
   }
-  
-  instances.value.push(instance)
-  success(`Instância "${instance.name}" criada com sucesso!`)
-  
-  newInstance.value.name = ''
-  newInstance.value.tagId = ''
-  newInstance.value.webhookUrl = ''
-  showAddModal.value = false
 }
 
 const openDeleteModal = (instance: Instance) => {
@@ -414,15 +484,24 @@ const openDeleteModal = (instance: Instance) => {
   showDeleteModal.value = true
 }
 
-const handleDeleteInstance = () => {
+const handleDeleteInstance = async () => {
   if (!instanceToDelete.value) return
   
-  const name = instanceToDelete.value.name
-  instances.value = instances.value.filter(i => i.id !== instanceToDelete.value?.id)
-  success(`Instância "${name}" excluída com sucesso!`)
-  
-  instanceToDelete.value = null
-  showDeleteModal.value = false
+  saving.value = true
+  try {
+    await api.deleteInstance(instanceToDelete.value.id)
+    const name = instanceToDelete.value.name
+    instances.value = instances.value.filter(i => i.id !== instanceToDelete.value?.id)
+    success(`Instância "${name}" excluída com sucesso!`)
+    
+    instanceToDelete.value = null
+    showDeleteModal.value = false
+  } catch (e) {
+    error('Erro ao excluir instância')
+    console.error(e)
+  } finally {
+    saving.value = false
+  }
 }
 
 const handleConnect = (instance: Instance) => {
@@ -432,29 +511,85 @@ const handleConnect = (instance: Instance) => {
 
 const openSettingsModal = (instance: Instance) => {
   instanceToEdit.value = instance
+  editSettings.value = {
+    ignoreGroups: instance.settings?.ignoreGroups ?? true,
+    webhookUrl: instance.settings?.webhookUrl || '',
+    receiveMessages: instance.settings?.webhookEvents?.receiveMessages ?? true,
+    tagId: instance.tagId || ''
+  }
   showSettingsModal.value = true
 }
 
-const saveSettings = () => {
+const saveSettings = async () => {
   if (!instanceToEdit.value) return
-  success(`Configurações da instância "${instanceToEdit.value.name}" salvas!`)
-  showSettingsModal.value = false
+  
+  saving.value = true
+  try {
+    const updated = await api.updateInstanceSettings(instanceToEdit.value.id, {
+      webhookUrl: editSettings.value.webhookUrl || undefined,
+      ignoreGroups: editSettings.value.ignoreGroups,
+      receiveMessages: editSettings.value.receiveMessages,
+      tagId: editSettings.value.tagId || undefined
+    })
+    
+    // Update local instance
+    const instance = instances.value.find(i => i.id === instanceToEdit.value?.id)
+    if (instance) {
+      instance.tagId = updated.tagId
+      instance.settings = {
+        ignoreGroups: updated.ignoreGroups,
+        webhookUrl: updated.webhookUrl || '',
+        webhookEvents: {
+          receiveMessages: updated.receiveMessages
+        }
+      }
+    }
+    
+    success(`Configurações da instância "${instanceToEdit.value.name}" salvas!`)
+    showSettingsModal.value = false
+  } catch (e) {
+    error('Erro ao salvar configurações')
+    console.error(e)
+  } finally {
+    saving.value = false
+  }
 }
 
-const simulateConnect = () => {
+const simulateConnect = async () => {
   if (!instanceToConnect.value) return
   
-  const instance = instances.value.find(i => i.id === instanceToConnect.value?.id)
-  if (instance) {
-    instance.status = 'connecting'
+  saving.value = true
+  try {
+    // First set to connecting
+    await api.updateInstanceStatus(instanceToConnect.value.id, 'connecting')
+    
+    const instance = instances.value.find(i => i.id === instanceToConnect.value?.id)
+    if (instance) {
+      instance.status = 'connecting'
+    }
+    
     showConnectModal.value = false
     
     // Simulate connection after 2 seconds
-    setTimeout(() => {
-      instance.status = 'connected'
-      instance.phoneNumber = `+55 11 ${Math.floor(Math.random() * 90000000 + 10000000)}`
-      success(`Instância "${instance.name}" conectada!`)
+    setTimeout(async () => {
+      if (!instanceToConnect.value) return
+      
+      const phoneNumber = `+55 11 ${Math.floor(Math.random() * 90000000 + 10000000)}`
+      const updated = await api.updateInstanceStatus(instanceToConnect.value.id, 'connected', phoneNumber)
+      
+      const inst = instances.value.find(i => i.id === updated.id)
+      if (inst) {
+        inst.status = 'connected'
+        inst.phoneNumber = updated.phoneNumber
+      }
+      
+      success(`Instância "${updated.name}" conectada!`)
     }, 2000)
+  } catch (e) {
+    error('Erro ao conectar instância')
+    console.error(e)
+  } finally {
+    saving.value = false
   }
 }
 </script>
