@@ -63,11 +63,11 @@ export const useApi = () => {
     }
 
     const updateInstanceStatus = async (
-        id: string,
+        name: string,
         status: string,
         phoneNumber?: string
     ): Promise<ApiInstance> => {
-        const response = await fetch(`${API_BASE_URL}/instances/${id}/status`, {
+        const response = await fetch(`${API_BASE_URL}/instances/${name}/status`, {
             method: 'PUT',
             headers: headers(),
             body: JSON.stringify({ status, phoneNumber })
@@ -77,7 +77,7 @@ export const useApi = () => {
     }
 
     const updateInstanceSettings = async (
-        id: string,
+        name: string,
         settings: {
             webhookUrl?: string
             ignoreGroups: boolean
@@ -85,7 +85,7 @@ export const useApi = () => {
             tagId?: string
         }
     ): Promise<ApiInstance> => {
-        const response = await fetch(`${API_BASE_URL}/instances/${id}/settings`, {
+        const response = await fetch(`${API_BASE_URL}/instances/${name}/settings`, {
             method: 'PUT',
             headers: headers(),
             body: JSON.stringify(settings)
@@ -94,8 +94,8 @@ export const useApi = () => {
         return response.json()
     }
 
-    const deleteInstance = async (id: string): Promise<void> => {
-        const response = await fetch(`${API_BASE_URL}/instances/${id}`, {
+    const deleteInstance = async (name: string): Promise<void> => {
+        const response = await fetch(`${API_BASE_URL}/instances/${name}`, {
             method: 'DELETE',
             headers: headers()
         })
@@ -140,13 +140,13 @@ export const useApi = () => {
     }
 
     // WhatsApp Connection
-    const connectInstance = async (id: string): Promise<{
+    const connectInstance = async (name: string): Promise<{
         status: string
         qrCode?: string
         phone?: string
         message: string
     }> => {
-        const response = await fetch(`${API_BASE_URL}/instances/${id}/connect`, {
+        const response = await fetch(`${API_BASE_URL}/instances/${name}/connect`, {
             method: 'POST',
             headers: headers()
         })
@@ -154,31 +154,31 @@ export const useApi = () => {
         return response.json()
     }
 
-    const getQRCode = async (id: string): Promise<{
+    const getQRCode = async (name: string): Promise<{
         qrCode: string
         status: string
         phone?: string
     }> => {
-        const response = await fetch(`${API_BASE_URL}/instances/${id}/qrcode`, {
+        const response = await fetch(`${API_BASE_URL}/instances/${name}/qrcode`, {
             headers: headers()
         })
         if (!response.ok) throw new Error('Failed to fetch QR code')
         return response.json()
     }
 
-    const getWhatsAppStatus = async (id: string): Promise<{
+    const getWhatsAppStatus = async (name: string): Promise<{
         status: string
         phone?: string
     }> => {
-        const response = await fetch(`${API_BASE_URL}/instances/${id}/wa-status`, {
+        const response = await fetch(`${API_BASE_URL}/instances/${name}/wa-status`, {
             headers: headers()
         })
         if (!response.ok) throw new Error('Failed to fetch status')
         return response.json()
     }
 
-    const disconnectInstance = async (id: string): Promise<void> => {
-        const response = await fetch(`${API_BASE_URL}/instances/${id}/disconnect`, {
+    const disconnectInstance = async (name: string): Promise<void> => {
+        const response = await fetch(`${API_BASE_URL}/instances/${name}/disconnect`, {
             method: 'POST',
             headers: headers()
         })

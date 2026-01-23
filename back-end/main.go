@@ -134,24 +134,17 @@ func main() {
 		return c.Status(201).JSON(formatInstance(instance))
 	})
 
-	api.Get("/instances/:id", func(c *fiber.Ctx) error {
-		id, err := parseUUID(c.Params("id"))
-		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
-		}
-
-		instance, err := queries.GetInstance(c.Context(), id)
+	api.Get("/instances/:name", func(c *fiber.Ctx) error {
+		name := c.Params("name")
+		instance, err := queries.GetInstanceByName(c.Context(), name)
 		if err != nil {
 			return c.Status(404).JSON(fiber.Map{"error": "Instance not found"})
 		}
 		return c.JSON(formatInstance(instance))
 	})
 
-	api.Put("/instances/:id/status", func(c *fiber.Ctx) error {
-		id, err := parseUUID(c.Params("id"))
-		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
-		}
+	api.Put("/instances/:name/status", func(c *fiber.Ctx) error {
+		name := c.Params("name")
 
 		var body struct {
 			Status      string  `json:"status"`
@@ -161,8 +154,8 @@ func main() {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
 		}
 
-		instance, err := queries.UpdateInstanceStatus(c.Context(), db.UpdateInstanceStatusParams{
-			ID:          id,
+		instance, err := queries.UpdateInstanceStatusByName(c.Context(), db.UpdateInstanceStatusByNameParams{
+			Name:        name,
 			Status:      body.Status,
 			PhoneNumber: textFromPtr(body.PhoneNumber),
 		})
@@ -172,11 +165,8 @@ func main() {
 		return c.JSON(formatInstance(instance))
 	})
 
-	api.Put("/instances/:id/settings", func(c *fiber.Ctx) error {
-		id, err := parseUUID(c.Params("id"))
-		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
-		}
+	api.Put("/instances/:name/settings", func(c *fiber.Ctx) error {
+		name := c.Params("name")
 
 		var body struct {
 			WebhookUrl      *string `json:"webhookUrl"`
@@ -188,8 +178,8 @@ func main() {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
 		}
 
-		instance, err := queries.UpdateInstanceSettings(c.Context(), db.UpdateInstanceSettingsParams{
-			ID:              id,
+		instance, err := queries.UpdateInstanceSettingsByName(c.Context(), db.UpdateInstanceSettingsByNameParams{
+			Name:            name,
 			WebhookUrl:      textFromPtr(body.WebhookUrl),
 			IgnoreGroups:    pgtype.Bool{Bool: body.IgnoreGroups, Valid: true},
 			ReceiveMessages: pgtype.Bool{Bool: body.ReceiveMessages, Valid: true},
@@ -201,18 +191,15 @@ func main() {
 		return c.JSON(formatInstance(instance))
 	})
 
-	api.Delete("/instances/:id", func(c *fiber.Ctx) error {
-		id, err := parseUUID(c.Params("id"))
-		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
-		}
+	api.Delete("/instances/:name", func(c *fiber.Ctx) error {
+		name := c.Params("name")
 
 		// Disconnect and remove WhatsApp client if exists
 		if waManager != nil {
-			waManager.RemoveClient(c.Params("id"))
+			waManager.RemoveClient(name)
 		}
 
-		err = queries.DeleteInstance(c.Context(), id)
+		err := queries.DeleteInstanceByName(c.Context(), name)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -220,19 +207,15 @@ func main() {
 	})
 
 	// WhatsApp connection routes
-	api.Post("/instances/:id/connect", func(c *fiber.Ctx) error {
+	api.Post("/instances/:name/connect", func(c *fiber.Ctx) error {
 		if waManager == nil {
 			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
 		}
 
-		instanceID := c.Params("id")
-		id, err := parseUUID(instanceID)
-		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
-		}
+		name := c.Params("name")
 
 		// Verify instance exists
-		_, err = queries.GetInstance(c.Context(), id)
+		_, err := queries.GetInstanceByName(c.Context(), name)
 		if err != nil {
 			return c.Status(404).JSON(fiber.Map{"error": "Instance not found"})
 		}
@@ -241,14 +224,14 @@ func main() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 
-		client, err := waManager.Connect(ctx, instanceID)
+		client, err := waManager.Connect(ctx, name)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// Update instance status to connecting
-		queries.UpdateInstanceStatus(c.Context(), db.UpdateInstanceStatusParams{
-			ID:     id,
+		queries.UpdateInstanceStatusByName(c.Context(), db.UpdateInstanceStatusByNameParams{
+			Name:   name,
 			Status: "connecting",
 		})
 
@@ -266,19 +249,19 @@ func main() {
 		})
 	})
 
-	api.Get("/instances/:id/qrcode", func(c *fiber.Ctx) error {
+	api.Get("/instances/:name/qrcode", func(c *fiber.Ctx) error {
 		if waManager == nil {
 			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
 		}
 
-		instanceID := c.Params("id")
+		name := c.Params("name")
 
-		qrCode, err := waManager.GetQRCode(instanceID)
+		qrCode, err := waManager.GetQRCode(name)
 		if err != nil {
 			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		status, phone, _ := waManager.GetStatus(instanceID)
+		status, phone, _ := waManager.GetStatus(name)
 
 		return c.JSON(fiber.Map{
 			"qrCode": qrCode,
@@ -287,23 +270,19 @@ func main() {
 		})
 	})
 
-	api.Get("/instances/:id/wa-status", func(c *fiber.Ctx) error {
+	api.Get("/instances/:name/wa-status", func(c *fiber.Ctx) error {
 		if waManager == nil {
 			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
 		}
 
-		instanceID := c.Params("id")
-		id, err := parseUUID(instanceID)
-		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
-		}
+		name := c.Params("name")
 
-		status, phone, _ := waManager.GetStatus(instanceID)
+		status, phone, _ := waManager.GetStatus(name)
 
 		// If connected and phone changed, update database
 		if status == "connected" && phone != "" {
-			queries.UpdateInstanceStatus(c.Context(), db.UpdateInstanceStatusParams{
-				ID:          id,
+			queries.UpdateInstanceStatusByName(c.Context(), db.UpdateInstanceStatusByNameParams{
+				Name:        name,
 				Status:      "connected",
 				PhoneNumber: pgtype.Text{String: phone, Valid: true},
 			})
@@ -315,25 +294,21 @@ func main() {
 		})
 	})
 
-	api.Post("/instances/:id/disconnect", func(c *fiber.Ctx) error {
+	api.Post("/instances/:name/disconnect", func(c *fiber.Ctx) error {
 		if waManager == nil {
 			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
 		}
 
-		instanceID := c.Params("id")
-		id, err := parseUUID(instanceID)
-		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
-		}
+		name := c.Params("name")
 
-		err = waManager.Disconnect(instanceID)
+		err := waManager.Disconnect(name)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// Update instance status
-		queries.UpdateInstanceStatus(c.Context(), db.UpdateInstanceStatusParams{
-			ID:     id,
+		queries.UpdateInstanceStatusByName(c.Context(), db.UpdateInstanceStatusByNameParams{
+			Name:   name,
 			Status: "disconnected",
 		})
 

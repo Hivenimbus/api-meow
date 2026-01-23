@@ -88,6 +88,16 @@ func (q *Queries) DeleteInstance(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const deleteInstanceByName = `-- name: DeleteInstanceByName :exec
+DELETE FROM instances
+WHERE name = $1
+`
+
+func (q *Queries) DeleteInstanceByName(ctx context.Context, name string) error {
+	_, err := q.db.Exec(ctx, deleteInstanceByName, name)
+	return err
+}
+
 const deleteTag = `-- name: DeleteTag :exec
 DELETE FROM tags
 WHERE id = $1
@@ -105,6 +115,29 @@ WHERE id = $1 LIMIT 1
 
 func (q *Queries) GetInstance(ctx context.Context, id pgtype.UUID) (Instance, error) {
 	row := q.db.QueryRow(ctx, getInstance, id)
+	var i Instance
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Status,
+		&i.PhoneNumber,
+		&i.TagID,
+		&i.IgnoreGroups,
+		&i.WebhookUrl,
+		&i.ReceiveMessages,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getInstanceByName = `-- name: GetInstanceByName :one
+SELECT id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at FROM instances
+WHERE name = $1 LIMIT 1
+`
+
+func (q *Queries) GetInstanceByName(ctx context.Context, name string) (Instance, error) {
+	row := q.db.QueryRow(ctx, getInstanceByName, name)
 	var i Instance
 	err := row.Scan(
 		&i.ID,
@@ -243,6 +276,45 @@ func (q *Queries) UpdateInstanceSettings(ctx context.Context, arg UpdateInstance
 	return i, err
 }
 
+const updateInstanceSettingsByName = `-- name: UpdateInstanceSettingsByName :one
+UPDATE instances
+SET webhook_url = $2, ignore_groups = $3, receive_messages = $4, tag_id = $5, updated_at = NOW()
+WHERE name = $1
+RETURNING id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at
+`
+
+type UpdateInstanceSettingsByNameParams struct {
+	Name            string
+	WebhookUrl      pgtype.Text
+	IgnoreGroups    pgtype.Bool
+	ReceiveMessages pgtype.Bool
+	TagID           pgtype.Text
+}
+
+func (q *Queries) UpdateInstanceSettingsByName(ctx context.Context, arg UpdateInstanceSettingsByNameParams) (Instance, error) {
+	row := q.db.QueryRow(ctx, updateInstanceSettingsByName,
+		arg.Name,
+		arg.WebhookUrl,
+		arg.IgnoreGroups,
+		arg.ReceiveMessages,
+		arg.TagID,
+	)
+	var i Instance
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Status,
+		&i.PhoneNumber,
+		&i.TagID,
+		&i.IgnoreGroups,
+		&i.WebhookUrl,
+		&i.ReceiveMessages,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateInstanceStatus = `-- name: UpdateInstanceStatus :one
 UPDATE instances
 SET status = $2, phone_number = $3, updated_at = NOW()
@@ -258,6 +330,37 @@ type UpdateInstanceStatusParams struct {
 
 func (q *Queries) UpdateInstanceStatus(ctx context.Context, arg UpdateInstanceStatusParams) (Instance, error) {
 	row := q.db.QueryRow(ctx, updateInstanceStatus, arg.ID, arg.Status, arg.PhoneNumber)
+	var i Instance
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Status,
+		&i.PhoneNumber,
+		&i.TagID,
+		&i.IgnoreGroups,
+		&i.WebhookUrl,
+		&i.ReceiveMessages,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateInstanceStatusByName = `-- name: UpdateInstanceStatusByName :one
+UPDATE instances
+SET status = $2, phone_number = $3, updated_at = NOW()
+WHERE name = $1
+RETURNING id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at
+`
+
+type UpdateInstanceStatusByNameParams struct {
+	Name        string
+	Status      string
+	PhoneNumber pgtype.Text
+}
+
+func (q *Queries) UpdateInstanceStatusByName(ctx context.Context, arg UpdateInstanceStatusByNameParams) (Instance, error) {
+	row := q.db.QueryRow(ctx, updateInstanceStatusByName, arg.Name, arg.Status, arg.PhoneNumber)
 	var i Instance
 	err := row.Scan(
 		&i.ID,

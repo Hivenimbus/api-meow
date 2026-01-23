@@ -506,7 +506,7 @@ const handleDeleteInstance = async () => {
   
   saving.value = true
   try {
-    await api.deleteInstance(instanceToDelete.value.id)
+    await api.deleteInstance(instanceToDelete.value.name)
     const name = instanceToDelete.value.name
     instances.value = instances.value.filter(i => i.id !== instanceToDelete.value?.id)
     success(`Instância "${name}" excluída com sucesso!`)
@@ -542,7 +542,7 @@ const saveSettings = async () => {
   
   saving.value = true
   try {
-    const updated = await api.updateInstanceSettings(instanceToEdit.value.id, {
+    const updated = await api.updateInstanceSettings(instanceToEdit.value.name, {
       webhookUrl: editSettings.value.webhookUrl || undefined,
       ignoreGroups: editSettings.value.ignoreGroups,
       receiveMessages: editSettings.value.receiveMessages,
@@ -582,7 +582,7 @@ const initiateConnection = async () => {
   qrCode.value = ''
   
   try {
-    const response = await api.connectInstance(instanceToConnect.value.id)
+    const response = await api.connectInstance(instanceToConnect.value.name)
     
     // Update status
     const instance = instances.value.find(i => i.id === instanceToConnect.value?.id)
@@ -595,7 +595,7 @@ const initiateConnection = async () => {
     }
     
     // Start polling for status/QR updates
-    startPolling(instanceToConnect.value.id)
+    startPolling(instanceToConnect.value.name)
     
   } catch (e) {
     error('Erro ao iniciar conexão')
@@ -606,15 +606,15 @@ const initiateConnection = async () => {
   }
 }
 
-const startPolling = (instanceId: string) => {
+const startPolling = (instanceName: string) => {
   if (connectionPollInterval.value) clearInterval(connectionPollInterval.value)
   
   connectionPollInterval.value = setInterval(async () => {
     try {
-      const statusData = await api.getWhatsAppStatus(instanceId)
+      const statusData = await api.getWhatsAppStatus(instanceName)
       
       // Update instance status
-      const instance = instances.value.find(i => i.id === instanceId)
+      const instance = instances.value.find(i => i.name === instanceName)
       if (instance) {
         // Map backend status to frontend status if needed
         if (statusData.status === 'connected') {
@@ -632,7 +632,7 @@ const startPolling = (instanceId: string) => {
       // If still connecting, try to get QR code if we don't have it or it expired
       if (statusData.status === 'connecting' || statusData.status === 'disconnected') {
          try {
-            const qrData = await api.getQRCode(instanceId)
+            const qrData = await api.getQRCode(instanceName)
             if (qrData.qrCode) {
                qrCode.value = qrData.qrCode
             }
@@ -665,7 +665,7 @@ const handleDisconnect = async (instance: Instance) => {
   if (!confirm(`Deseja desconectar a instância ${instance.name}?`)) return
 
   try {
-    await api.disconnectInstance(instance.id)
+    await api.disconnectInstance(instance.name)
     instance.status = 'disconnected'
     instance.phoneNumber = undefined
     success('Instância desconectada com sucesso')

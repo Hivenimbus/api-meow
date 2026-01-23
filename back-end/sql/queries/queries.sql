@@ -14,10 +14,20 @@ ORDER BY created_at DESC;
 SELECT * FROM instances
 WHERE id = $1 LIMIT 1;
 
+-- name: GetInstanceByName :one
+SELECT * FROM instances
+WHERE name = $1 LIMIT 1;
+
 -- name: UpdateInstanceStatus :one
 UPDATE instances
 SET status = $2, phone_number = $3, updated_at = NOW()
 WHERE id = $1
+RETURNING *;
+
+-- name: UpdateInstanceStatusByName :one
+UPDATE instances
+SET status = $2, phone_number = $3, updated_at = NOW()
+WHERE name = $1
 RETURNING *;
 
 -- name: UpdateInstanceSettings :one
@@ -26,9 +36,19 @@ SET webhook_url = $2, ignore_groups = $3, receive_messages = $4, tag_id = $5, up
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateInstanceSettingsByName :one
+UPDATE instances
+SET webhook_url = $2, ignore_groups = $3, receive_messages = $4, tag_id = $5, updated_at = NOW()
+WHERE name = $1
+RETURNING *;
+
 -- name: DeleteInstance :exec
 DELETE FROM instances
 WHERE id = $1;
+
+-- name: DeleteInstanceByName :exec
+DELETE FROM instances
+WHERE name = $1;
 
 -- name: CreateTag :one
 INSERT INTO tags (
