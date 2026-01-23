@@ -292,3 +292,81 @@ func (m *InstanceManager) Close() {
 
 	m.clients = make(map[string]*WAClient)
 }
+
+// SendTextMessage sends a text message through the specified instance
+func (m *InstanceManager) SendTextMessage(instanceID string, recipient string, text string, simulateTyping bool, typingDurationMs int) (*SendResponse, error) {
+	m.mu.RLock()
+	client, exists := m.clients[instanceID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("client not found for instance %s", instanceID)
+	}
+
+	return client.SendTextMessage(m.ctx, recipient, text, simulateTyping, typingDurationMs)
+}
+
+// SendImageMessage sends an image through the specified instance
+func (m *InstanceManager) SendImageMessage(instanceID string, recipient string, imageData []byte, mimeType string, caption string) (*SendResponse, error) {
+	m.mu.RLock()
+	client, exists := m.clients[instanceID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("client not found for instance %s", instanceID)
+	}
+
+	return client.SendImageMessage(m.ctx, recipient, imageData, mimeType, caption)
+}
+
+// SendVideoMessage sends a video through the specified instance
+func (m *InstanceManager) SendVideoMessage(instanceID string, recipient string, videoData []byte, mimeType string, caption string) (*SendResponse, error) {
+	m.mu.RLock()
+	client, exists := m.clients[instanceID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("client not found for instance %s", instanceID)
+	}
+
+	return client.SendVideoMessage(m.ctx, recipient, videoData, mimeType, caption)
+}
+
+// SendAudioMessage sends an audio file through the specified instance
+func (m *InstanceManager) SendAudioMessage(instanceID string, recipient string, audioData []byte, mimeType string, simulateRecording bool, recordingDurationMs int, ptt bool) (*SendResponse, error) {
+	m.mu.RLock()
+	client, exists := m.clients[instanceID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("client not found for instance %s", instanceID)
+	}
+
+	return client.SendAudioMessage(m.ctx, recipient, audioData, mimeType, simulateRecording, recordingDurationMs, ptt)
+}
+
+// SendDocumentMessage sends a document through the specified instance
+func (m *InstanceManager) SendDocumentMessage(instanceID string, recipient string, docData []byte, mimeType string, fileName string, caption string) (*SendResponse, error) {
+	m.mu.RLock()
+	client, exists := m.clients[instanceID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("client not found for instance %s", instanceID)
+	}
+
+	return client.SendDocumentMessage(m.ctx, recipient, docData, mimeType, fileName, caption)
+}
+
+// GetContacts retrieves contacts for the specified instance
+func (m *InstanceManager) GetContacts(instanceID string) ([]ContactInfo, error) {
+	m.mu.RLock()
+	client, exists := m.clients[instanceID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("client not found for instance %s", instanceID)
+	}
+
+	return client.GetContacts(m.ctx)
+}

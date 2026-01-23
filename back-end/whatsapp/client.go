@@ -9,7 +9,10 @@ import (
 
 	"github.com/skip2/go-qrcode"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	"google.golang.org/protobuf/proto"
 )
 
 // WAClient wraps a whatsmeow client with additional functionality
@@ -232,4 +235,292 @@ func (w *WAClient) GetPhoneNumber() string {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return w.phone
+}
+
+// SendResponse contains the response after sending a message
+type SendResponse struct {
+	MessageID string
+	Timestamp time.Time
+}
+
+// ContactInfo contains contact information
+type ContactInfo struct {
+	JID          string `json:"jid"`
+	PhoneNumber  string `json:"phoneNumber"`
+	Name         string `json:"name"`
+	PushName     string `json:"pushName"`
+	BusinessName string `json:"businessName"`
+}
+
+// SendTextMessage sends a text message with optional typing indicator
+func (w *WAClient) SendTextMessage(ctx context.Context, recipient string, text string, simulateTyping bool, typingDurationMs int) (*SendResponse, error) {
+	if !w.client.IsConnected() {
+		return nil, fmt.Errorf("client is not connected")
+	}
+
+	// Parse recipient JID
+	recipientJID, err := types.ParseJID(recipient + "@s.whatsapp.net")
+	if err != nil {
+		return nil, fmt.Errorf("invalid recipient: %w", err)
+	}
+
+	// Simulate typing if requested
+	if simulateTyping {
+		duration := typingDurationMs
+		if duration <= 0 {
+			duration = 2000 // Default 2 seconds
+		}
+
+		// Send typing presence
+		err := w.client.SendChatPresence(ctx, recipientJID, types.ChatPresenceComposing, types.ChatPresenceMediaText)
+		if err != nil {
+			// Log but don't fail the message send
+			fmt.Printf("Warning: failed to send typing presence: %v\n", err)
+		}
+
+		// Wait for typing duration
+		time.Sleep(time.Duration(duration) * time.Millisecond)
+
+		// Clear typing presence
+		w.client.SendChatPresence(ctx, recipientJID, types.ChatPresencePaused, types.ChatPresenceMediaText)
+	}
+
+	// Create and send message
+	msg := &waE2E.Message{
+		Conversation: proto.String(text),
+	}
+
+	resp, err := w.client.SendMessage(ctx, recipientJID, msg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send message: %w", err)
+	}
+
+	return &SendResponse{
+		MessageID: resp.ID,
+		Timestamp: resp.Timestamp,
+	}, nil
+}
+
+// SendImageMessage sends an image with optional caption
+func (w *WAClient) SendImageMessage(ctx context.Context, recipient string, imageData []byte, mimeType string, caption string) (*SendResponse, error) {
+	if !w.client.IsConnected() {
+		return nil, fmt.Errorf("client is not connected")
+	}
+
+	// Parse recipient JID
+	recipientJID, err := types.ParseJID(recipient + "@s.whatsapp.net")
+	if err != nil {
+		return nil, fmt.Errorf("invalid recipient: %w", err)
+	}
+
+	// Upload image
+	uploadResp, err := w.client.Upload(ctx, imageData, whatsmeow.MediaImage)
+	if err != nil {
+		return nil, fmt.Errorf("failed to upload image: %w", err)
+	}
+
+	// Create image message
+	msg := &waE2E.Message{
+		ImageMessage: &waE2E.ImageMessage{
+			URL:           proto.String(uploadResp.URL),
+			DirectPath:    proto.String(uploadResp.DirectPath),
+			MediaKey:      uploadResp.MediaKey,
+			Mimetype:      proto.String(mimeType),
+			FileEncSHA256: uploadResp.FileEncSHA256,
+			FileSHA256:    uploadResp.FileSHA256,
+			FileLength:    proto.Uint64(uint64(len(imageData))),
+			Caption:       proto.String(caption),
+		},
+	}
+
+	resp, err := w.client.SendMessage(ctx, recipientJID, msg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send image: %w", err)
+	}
+
+	return &SendResponse{
+		MessageID: resp.ID,
+		Timestamp: resp.Timestamp,
+	}, nil
+}
+
+// SendVideoMessage sends a video with optional caption
+func (w *WAClient) SendVideoMessage(ctx context.Context, recipient string, videoData []byte, mimeType string, caption string) (*SendResponse, error) {
+	if !w.client.IsConnected() {
+		return nil, fmt.Errorf("client is not connected")
+	}
+
+	// Parse recipient JID
+	recipientJID, err := types.ParseJID(recipient + "@s.whatsapp.net")
+	if err != nil {
+		return nil, fmt.Errorf("invalid recipient: %w", err)
+	}
+
+	// Upload video
+	uploadResp, err := w.client.Upload(ctx, videoData, whatsmeow.MediaVideo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to upload video: %w", err)
+	}
+
+	// Create video message
+	msg := &waE2E.Message{
+		VideoMessage: &waE2E.VideoMessage{
+			URL:           proto.String(uploadResp.URL),
+			DirectPath:    proto.String(uploadResp.DirectPath),
+			MediaKey:      uploadResp.MediaKey,
+			Mimetype:      proto.String(mimeType),
+			FileEncSHA256: uploadResp.FileEncSHA256,
+			FileSHA256:    uploadResp.FileSHA256,
+			FileLength:    proto.Uint64(uint64(len(videoData))),
+			Caption:       proto.String(caption),
+		},
+	}
+
+	resp, err := w.client.SendMessage(ctx, recipientJID, msg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send video: %w", err)
+	}
+
+	return &SendResponse{
+		MessageID: resp.ID,
+		Timestamp: resp.Timestamp,
+	}, nil
+}
+
+// SendAudioMessage sends an audio file with optional recording indicator
+func (w *WAClient) SendAudioMessage(ctx context.Context, recipient string, audioData []byte, mimeType string, simulateRecording bool, recordingDurationMs int, ptt bool) (*SendResponse, error) {
+	if !w.client.IsConnected() {
+		return nil, fmt.Errorf("client is not connected")
+	}
+
+	// Parse recipient JID
+	recipientJID, err := types.ParseJID(recipient + "@s.whatsapp.net")
+	if err != nil {
+		return nil, fmt.Errorf("invalid recipient: %w", err)
+	}
+
+	// Simulate recording if requested
+	if simulateRecording {
+		duration := recordingDurationMs
+		if duration <= 0 {
+			duration = 3000 // Default 3 seconds
+		}
+
+		// Send recording presence
+		err := w.client.SendChatPresence(ctx, recipientJID, types.ChatPresenceComposing, types.ChatPresenceMediaAudio)
+		if err != nil {
+			fmt.Printf("Warning: failed to send recording presence: %v\n", err)
+		}
+
+		// Wait for recording duration
+		time.Sleep(time.Duration(duration) * time.Millisecond)
+
+		// Clear recording presence
+		w.client.SendChatPresence(ctx, recipientJID, types.ChatPresencePaused, types.ChatPresenceMediaAudio)
+	}
+
+	// Upload audio
+	uploadResp, err := w.client.Upload(ctx, audioData, whatsmeow.MediaAudio)
+	if err != nil {
+		return nil, fmt.Errorf("failed to upload audio: %w", err)
+	}
+
+	// Create audio message
+	msg := &waE2E.Message{
+		AudioMessage: &waE2E.AudioMessage{
+			URL:           proto.String(uploadResp.URL),
+			DirectPath:    proto.String(uploadResp.DirectPath),
+			MediaKey:      uploadResp.MediaKey,
+			Mimetype:      proto.String(mimeType),
+			FileEncSHA256: uploadResp.FileEncSHA256,
+			FileSHA256:    uploadResp.FileSHA256,
+			FileLength:    proto.Uint64(uint64(len(audioData))),
+			PTT:           proto.Bool(ptt),
+		},
+	}
+
+	resp, err := w.client.SendMessage(ctx, recipientJID, msg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send audio: %w", err)
+	}
+
+	return &SendResponse{
+		MessageID: resp.ID,
+		Timestamp: resp.Timestamp,
+	}, nil
+}
+
+// SendDocumentMessage sends a document with optional caption and filename
+func (w *WAClient) SendDocumentMessage(ctx context.Context, recipient string, docData []byte, mimeType string, fileName string, caption string) (*SendResponse, error) {
+	if !w.client.IsConnected() {
+		return nil, fmt.Errorf("client is not connected")
+	}
+
+	// Parse recipient JID
+	recipientJID, err := types.ParseJID(recipient + "@s.whatsapp.net")
+	if err != nil {
+		return nil, fmt.Errorf("invalid recipient: %w", err)
+	}
+
+	// Upload document
+	uploadResp, err := w.client.Upload(ctx, docData, whatsmeow.MediaDocument)
+	if err != nil {
+		return nil, fmt.Errorf("failed to upload document: %w", err)
+	}
+
+	// Create document message
+	msg := &waE2E.Message{
+		DocumentMessage: &waE2E.DocumentMessage{
+			URL:           proto.String(uploadResp.URL),
+			DirectPath:    proto.String(uploadResp.DirectPath),
+			MediaKey:      uploadResp.MediaKey,
+			Mimetype:      proto.String(mimeType),
+			FileEncSHA256: uploadResp.FileEncSHA256,
+			FileSHA256:    uploadResp.FileSHA256,
+			FileLength:    proto.Uint64(uint64(len(docData))),
+			FileName:      proto.String(fileName),
+			Caption:       proto.String(caption),
+		},
+	}
+
+	resp, err := w.client.SendMessage(ctx, recipientJID, msg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send document: %w", err)
+	}
+
+	return &SendResponse{
+		MessageID: resp.ID,
+		Timestamp: resp.Timestamp,
+	}, nil
+}
+
+// GetContacts retrieves all contacts from the store (excluding groups)
+func (w *WAClient) GetContacts(ctx context.Context) ([]ContactInfo, error) {
+	if !w.client.IsConnected() {
+		return nil, fmt.Errorf("client is not connected")
+	}
+
+	// Get all contacts from the store
+	contacts, err := w.client.Store.Contacts.GetAllContacts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get contacts: %w", err)
+	}
+
+	var result []ContactInfo
+	for jid, contact := range contacts {
+		// Filter out groups - only include user JIDs
+		if jid.Server != types.DefaultUserServer {
+			continue
+		}
+
+		result = append(result, ContactInfo{
+			JID:          jid.String(),
+			PhoneNumber:  jid.User,
+			Name:         contact.FullName,
+			PushName:     contact.PushName,
+			BusinessName: contact.BusinessName,
+		})
+	}
+
+	return result, nil
 }

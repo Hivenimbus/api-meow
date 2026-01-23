@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"log"
 	"os"
 	"strings"
@@ -313,6 +314,115 @@ func main() {
 		})
 
 		return c.JSON(fiber.Map{"message": "Disconnected successfully"})
+	})
+
+	// Send text message endpoint
+	api.Post("/instances/:name/send-message", func(c *fiber.Ctx) error {
+		if waManager == nil {
+			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
+		}
+
+		name := c.Params("name")
+
+		var body struct {
+			To             string `json:"to"`
+			Text           string `json:"text"`
+			SimulateTyping bool   `json:"simulateTyping"`
+			TypingDuration int    `json:"typingDuration"` // milliseconds
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
+		}
+
+		if body.To == "" || body.Text == "" {
+			return c.Status(400).JSON(fiber.Map{"error": "to and text are required"})
+		}
+
+		resp, err := waManager.SendTextMessage(name, body.To, body.Text, body.SimulateTyping, body.TypingDuration)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{
+			"messageId": resp.MessageID,
+			"timestamp": resp.Timestamp.Format(time.RFC3339),
+		})
+	})
+
+	// Send media endpoint
+	api.Post("/instances/:name/send-media", func(c *fiber.Ctx) error {
+		if waManager == nil {
+			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
+		}
+
+		name := c.Params("name")
+
+		var body struct {
+			To                string `json:"to"`
+			MediaType         string `json:"mediaType"` // image, video, audio, document
+			Base64Data        string `json:"base64Data"`
+			MimeType          string `json:"mimeType"`
+			Caption           string `json:"caption"`           // For image, video, document
+			FileName          string `json:"fileName"`          // For document
+			SimulateRecording bool   `json:"simulateRecording"` // For audio
+			RecordingDuration int    `json:"recordingDuration"` // For audio (ms)
+			PTT               bool   `json:"ptt"`               // For audio (push-to-talk)
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
+		}
+
+		if body.To == "" || body.MediaType == "" || body.Base64Data == "" || body.MimeType == "" {
+			return c.Status(400).JSON(fiber.Map{"error": "to, mediaType, base64Data, and mimeType are required"})
+		}
+
+		// Decode base64 data
+		mediaData, err := base64.StdEncoding.DecodeString(body.Base64Data)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid base64 data"})
+		}
+
+		var resp *whatsapp.SendResponse
+
+		switch body.MediaType {
+		case "image":
+			resp, err = waManager.SendImageMessage(name, body.To, mediaData, body.MimeType, body.Caption)
+		case "video":
+			resp, err = waManager.SendVideoMessage(name, body.To, mediaData, body.MimeType, body.Caption)
+		case "audio":
+			resp, err = waManager.SendAudioMessage(name, body.To, mediaData, body.MimeType, body.SimulateRecording, body.RecordingDuration, body.PTT)
+		case "document":
+			resp, err = waManager.SendDocumentMessage(name, body.To, mediaData, body.MimeType, body.FileName, body.Caption)
+		default:
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid mediaType. Must be: image, video, audio, or document"})
+		}
+
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{
+			"messageId": resp.MessageID,
+			"timestamp": resp.Timestamp.Format(time.RFC3339),
+		})
+	})
+
+	// Get contacts endpoint
+	api.Get("/instances/:name/contacts", func(c *fiber.Ctx) error {
+		if waManager == nil {
+			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
+		}
+
+		name := c.Params("name")
+
+		contacts, err := waManager.GetContacts(name)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{
+			"contacts": contacts,
+		})
 	})
 
 	// Tag routes
