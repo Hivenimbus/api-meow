@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -361,6 +363,7 @@ func main() {
 			To                string `json:"to"`
 			MediaType         string `json:"mediaType"` // image, video, audio, document
 			Base64Data        string `json:"base64Data"`
+			URL               string `json:"url"` // Alternative to base64Data
 			MimeType          string `json:"mimeType"`
 			Caption           string `json:"caption"`           // For image, video, document
 			FileName          string `json:"fileName"`          // For document
@@ -372,14 +375,39 @@ func main() {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
 		}
 
-		if body.To == "" || body.MediaType == "" || body.Base64Data == "" || body.MimeType == "" {
-			return c.Status(400).JSON(fiber.Map{"error": "to, mediaType, base64Data, and mimeType are required"})
+		if body.To == "" || body.MediaType == "" || body.MimeType == "" {
+			return c.Status(400).JSON(fiber.Map{"error": "to, mediaType, and mimeType are required"})
 		}
 
-		// Decode base64 data
-		mediaData, err := base64.StdEncoding.DecodeString(body.Base64Data)
-		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid base64 data"})
+		if body.Base64Data == "" && body.URL == "" {
+			return c.Status(400).JSON(fiber.Map{"error": "Either base64Data or url must be provided"})
+		}
+
+		var mediaData []byte
+		var err error
+
+		if body.URL != "" {
+			// Download from URL
+			httpResp, err := http.Get(body.URL)
+			if err != nil {
+				return c.Status(400).JSON(fiber.Map{"error": "Failed to download from URL: " + err.Error()})
+			}
+			defer httpResp.Body.Close()
+
+			if httpResp.StatusCode != http.StatusOK {
+				return c.Status(400).JSON(fiber.Map{"error": "Failed to download from URL: HTTP " + httpResp.Status})
+			}
+
+			mediaData, err = io.ReadAll(httpResp.Body)
+			if err != nil {
+				return c.Status(400).JSON(fiber.Map{"error": "Failed to read URL response: " + err.Error()})
+			}
+		} else {
+			// Decode base64 data
+			mediaData, err = base64.StdEncoding.DecodeString(body.Base64Data)
+			if err != nil {
+				return c.Status(400).JSON(fiber.Map{"error": "Invalid base64 data"})
+			}
 		}
 
 		var resp *whatsapp.SendResponse
