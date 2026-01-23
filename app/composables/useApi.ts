@@ -139,6 +139,52 @@ export const useApi = () => {
         if (!response.ok) throw new Error('Failed to delete tag')
     }
 
+    // WhatsApp Connection
+    const connectInstance = async (id: string): Promise<{
+        status: string
+        qrCode?: string
+        phone?: string
+        message: string
+    }> => {
+        const response = await fetch(`${API_BASE_URL}/instances/${id}/connect`, {
+            method: 'POST',
+            headers: headers()
+        })
+        if (!response.ok) throw new Error('Failed to initiate connection')
+        return response.json()
+    }
+
+    const getQRCode = async (id: string): Promise<{
+        qrCode: string
+        status: string
+        phone?: string
+    }> => {
+        const response = await fetch(`${API_BASE_URL}/instances/${id}/qrcode`, {
+            headers: headers()
+        })
+        if (!response.ok) throw new Error('Failed to fetch QR code')
+        return response.json()
+    }
+
+    const getWhatsAppStatus = async (id: string): Promise<{
+        status: string
+        phone?: string
+    }> => {
+        const response = await fetch(`${API_BASE_URL}/instances/${id}/wa-status`, {
+            headers: headers()
+        })
+        if (!response.ok) throw new Error('Failed to fetch status')
+        return response.json()
+    }
+
+    const disconnectInstance = async (id: string): Promise<void> => {
+        const response = await fetch(`${API_BASE_URL}/instances/${id}/disconnect`, {
+            method: 'POST',
+            headers: headers()
+        })
+        if (!response.ok) throw new Error('Failed to disconnect')
+    }
+
     return {
         // Instances
         fetchInstances,
@@ -150,6 +196,11 @@ export const useApi = () => {
         fetchTags,
         createTag,
         updateTag,
-        deleteTag
+        deleteTag,
+        // WhatsApp
+        connectInstance,
+        getQRCode,
+        getWhatsAppStatus,
+        disconnectInstance
     }
 }

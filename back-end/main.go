@@ -5,8 +5,10 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"api-meow/internal/db"
+	"api-meow/whatsapp"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -42,6 +44,17 @@ func main() {
 
 	// Initialize queries
 	queries := db.New(pool)
+
+	// Initialize WhatsApp manager
+	waManager, err := whatsapp.NewInstanceManager(dbURL)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize WhatsApp manager: %v", err)
+		// Continue without WhatsApp functionality
+		waManager = nil
+	} else {
+		defer waManager.Close()
+		log.Println("WhatsApp manager initialized successfully")
+	}
 
 	app := fiber.New(fiber.Config{
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
@@ -183,11 +196,137 @@ func main() {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
 		}
 
+		// Disconnect and remove WhatsApp client if exists
+		if waManager != nil {
+			waManager.RemoveClient(c.Params("id"))
+		}
+
 		err = queries.DeleteInstance(c.Context(), id)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 		return c.SendStatus(204)
+	})
+
+	// WhatsApp connection routes
+	api.Post("/instances/:id/connect", func(c *fiber.Ctx) error {
+		if waManager == nil {
+			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
+		}
+
+		instanceID := c.Params("id")
+		id, err := parseUUID(instanceID)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
+		}
+
+		// Verify instance exists
+		_, err = queries.GetInstance(c.Context(), id)
+		if err != nil {
+			return c.Status(404).JSON(fiber.Map{"error": "Instance not found"})
+		}
+
+		// Start connection (will generate QR code if needed)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+
+		client, err := waManager.Connect(ctx, instanceID)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		// Update instance status to connecting
+		queries.UpdateInstanceStatus(c.Context(), db.UpdateInstanceStatusParams{
+			ID:     id,
+			Status: "connecting",
+		})
+
+		// Wait a bit for QR code to be generated
+		time.Sleep(500 * time.Millisecond)
+
+		qrCode := client.GetQRCode()
+		status, phone := client.GetStatus()
+
+		return c.JSON(fiber.Map{
+			"status":  status,
+			"qrCode":  qrCode,
+			"phone":   phone,
+			"message": "Connection initiated",
+		})
+	})
+
+	api.Get("/instances/:id/qrcode", func(c *fiber.Ctx) error {
+		if waManager == nil {
+			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
+		}
+
+		instanceID := c.Params("id")
+
+		qrCode, err := waManager.GetQRCode(instanceID)
+		if err != nil {
+			return c.Status(404).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		status, phone, _ := waManager.GetStatus(instanceID)
+
+		return c.JSON(fiber.Map{
+			"qrCode": qrCode,
+			"status": status,
+			"phone":  phone,
+		})
+	})
+
+	api.Get("/instances/:id/wa-status", func(c *fiber.Ctx) error {
+		if waManager == nil {
+			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
+		}
+
+		instanceID := c.Params("id")
+		id, err := parseUUID(instanceID)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
+		}
+
+		status, phone, _ := waManager.GetStatus(instanceID)
+
+		// If connected and phone changed, update database
+		if status == "connected" && phone != "" {
+			queries.UpdateInstanceStatus(c.Context(), db.UpdateInstanceStatusParams{
+				ID:          id,
+				Status:      "connected",
+				PhoneNumber: pgtype.Text{String: phone, Valid: true},
+			})
+		}
+
+		return c.JSON(fiber.Map{
+			"status": status,
+			"phone":  phone,
+		})
+	})
+
+	api.Post("/instances/:id/disconnect", func(c *fiber.Ctx) error {
+		if waManager == nil {
+			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
+		}
+
+		instanceID := c.Params("id")
+		id, err := parseUUID(instanceID)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
+		}
+
+		err = waManager.Disconnect(instanceID)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		// Update instance status
+		queries.UpdateInstanceStatus(c.Context(), db.UpdateInstanceStatusParams{
+			ID:     id,
+			Status: "disconnected",
+		})
+
+		return c.JSON(fiber.Map{"message": "Disconnected successfully"})
 	})
 
 	// Tag routes

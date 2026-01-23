@@ -114,6 +114,7 @@
           :key="instance.id"
           :instance="instance"
           @connect="handleConnect(instance)"
+          @disconnect="handleDisconnect(instance)"
           @delete="openDeleteModal(instance)"
           @settings="openSettingsModal(instance)"
         />
@@ -234,12 +235,21 @@
     <!-- Connect Modal (QR Code placeholder) -->
     <Modal v-model="showConnectModal" title="Conectar Instância" size="md">
       <div class="text-center py-4">
-        <div class="w-48 h-48 mx-auto mb-4 bg-white rounded-2xl flex items-center justify-center">
-          <div class="text-slate-800 text-center p-4">
-            <svg class="w-24 h-24 mx-auto mb-2 text-slate-600" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M3 3h6v6H3V3zm2 2v2h2V5H5zm8-2h6v6h-6V3zm2 2v2h2V5h-2zM3 13h6v6H3v-6zm2 2v2h2v-2H5zm13-2h1v1h-1v-1zm-3 0h1v1h-1v-1zm-1 1h1v1h-1v-1zm2 0h1v1h-1v-1zm1 1h1v1h-1v-1zm-3 0h1v1h-1v-1zm4 0h1v1h-1v-1zm-1 1h1v1h-1v-1zm-3 0h1v1h-1v-1zm2 0h1v1h-1v-1zm1 1h1v1h-1v-1zm1 1h1v1h-1v-1zm-1 1h1v1h-1v-1zm1 0h1v1h-1v-1z"/>
-            </svg>
-            <p class="text-sm font-medium">QR Code</p>
+        <div class="w-64 h-64 mx-auto mb-4 bg-white rounded-2xl flex items-center justify-center overflow-hidden">
+          <div v-if="qrCode" class="w-full h-full">
+             <img :src="`data:image/png;base64,${qrCode}`" alt="QR Code" class="w-full h-full object-contain" />
+          </div>
+          <div v-else class="text-slate-800 text-center p-4">
+            <template v-if="saving">
+               <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500 mx-auto mb-2"></div>
+               <p class="text-sm font-medium">Gerando QR Code...</p>
+            </template>
+            <template v-else>
+               <svg class="w-24 h-24 mx-auto mb-2 text-slate-600" fill="currentColor" viewBox="0 0 24 24">
+                 <path d="M3 3h6v6H3V3zm2 2v2h2V5H5zm8-2h6v6h-6V3zm2 2v2h2V5h-2zM3 13h6v6H3v-6zm2 2v2h2v-2H5zm13-2h1v1h-1v-1zm-3 0h1v1h-1v-1zm-1 1h1v1h-1v-1zm2 0h1v1h-1v-1zm1 1h1v1h-1v-1zm-3 0h1v1h-1v-1zm4 0h1v1h-1v-1zm-1 1h1v1h-1v-1zm-3 0h1v1h-1v-1zm2 0h1v1h-1v-1zm1 1h1v1h-1v-1zm1 1h1v1h-1v-1zm-1 1h1v1h-1v-1zm1 0h1v1h-1v-1z"/>
+               </svg>
+               <p class="text-sm font-medium">QR Code</p>
+            </template>
           </div>
         </div>
         <h4 class="text-lg font-semibold text-white mb-2">{{ instanceToConnect?.name }}</h4>
@@ -248,13 +258,20 @@
         </p>
       </div>
       <template #footer>
-        <div class="flex justify-center">
+        <div class="flex justify-center gap-3">
+           <button
+            @click="closeConnectModal"
+            class="px-4 py-2 text-slate-300 hover:text-white transition-colors"
+          >
+            Cancelar
+          </button>
           <button
-            @click="simulateConnect"
+            v-if="!qrCode"
+            @click="initiateConnection"
             :disabled="saving"
             class="px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-medium rounded-xl hover:from-emerald-600 hover:to-teal-600 transition-all disabled:opacity-50"
           >
-            {{ saving ? 'Conectando...' : 'Simular Conexão' }}
+            {{ saving ? 'Gerando...' : 'Gerar QR Code' }}
           </button>
         </div>
       </template>
@@ -555,41 +572,106 @@ const saveSettings = async () => {
   }
 }
 
-const simulateConnect = async () => {
+const qrCode = ref('')
+const connectionPollInterval = ref<NodeJS.Timeout | null>(null)
+
+const initiateConnection = async () => {
   if (!instanceToConnect.value) return
   
   saving.value = true
+  qrCode.value = ''
+  
   try {
-    // First set to connecting
-    await api.updateInstanceStatus(instanceToConnect.value.id, 'connecting')
+    const response = await api.connectInstance(instanceToConnect.value.id)
     
+    // Update status
     const instance = instances.value.find(i => i.id === instanceToConnect.value?.id)
     if (instance) {
       instance.status = 'connecting'
     }
+
+    if (response.qrCode) {
+      qrCode.value = response.qrCode
+    }
     
-    showConnectModal.value = false
+    // Start polling for status/QR updates
+    startPolling(instanceToConnect.value.id)
     
-    // Simulate connection after 2 seconds
-    setTimeout(async () => {
-      if (!instanceToConnect.value) return
-      
-      const phoneNumber = `+55 11 ${Math.floor(Math.random() * 90000000 + 10000000)}`
-      const updated = await api.updateInstanceStatus(instanceToConnect.value.id, 'connected', phoneNumber)
-      
-      const inst = instances.value.find(i => i.id === updated.id)
-      if (inst) {
-        inst.status = 'connected'
-        inst.phoneNumber = updated.phoneNumber
-      }
-      
-      success(`Instância "${updated.name}" conectada!`)
-    }, 2000)
   } catch (e) {
-    error('Erro ao conectar instância')
+    error('Erro ao iniciar conexão')
     console.error(e)
+    showConnectModal.value = false
   } finally {
     saving.value = false
+  }
+}
+
+const startPolling = (instanceId: string) => {
+  if (connectionPollInterval.value) clearInterval(connectionPollInterval.value)
+  
+  connectionPollInterval.value = setInterval(async () => {
+    try {
+      const statusData = await api.getWhatsAppStatus(instanceId)
+      
+      // Update instance status
+      const instance = instances.value.find(i => i.id === instanceId)
+      if (instance) {
+        // Map backend status to frontend status if needed
+        if (statusData.status === 'connected') {
+          instance.status = 'connected'
+          instance.phoneNumber = statusData.phone
+          success(`Instância conectada: ${statusData.phone}`)
+          stopPolling()
+          showConnectModal.value = false
+          return
+        } else if (statusData.status === 'disconnected') {
+           instance.status = 'disconnected'
+        }
+      }
+      
+      // If still connecting, try to get QR code if we don't have it or it expired
+      if (statusData.status === 'connecting' || statusData.status === 'disconnected') {
+         try {
+            const qrData = await api.getQRCode(instanceId)
+            if (qrData.qrCode) {
+               qrCode.value = qrData.qrCode
+            }
+         } catch (e) {
+            // Ignore error fetching QR code (might not be ready yet)
+         }
+      }
+
+    } catch (e) {
+      console.error('Error polling status:', e)
+    }
+  }, 2000)
+}
+
+const stopPolling = () => {
+  if (connectionPollInterval.value) {
+    clearInterval(connectionPollInterval.value)
+    connectionPollInterval.value = null
+  }
+}
+
+// Clean up polling when modal closes
+const closeConnectModal = () => {
+  stopPolling()
+  showConnectModal.value = false
+  qrCode.value = ''
+}
+
+const handleDisconnect = async (instance: Instance) => {
+  if (!confirm(`Deseja desconectar a instância ${instance.name}?`)) return
+
+  try {
+    await api.disconnectInstance(instance.id)
+    instance.status = 'disconnected'
+    instance.phoneNumber = undefined
+    success('Instância desconectada com sucesso')
+  } catch (e) {
+    error('Erro ao desconectar instância')
+    console.error(e)
   }
 }
 </script>

@@ -78,12 +78,11 @@
     
     <!-- Connect Button -->
     <button
-      @click.stop="$emit('connect')"
-      :disabled="instance.status === 'connected'"
+      @click.stop="instance.status === 'connected' ? $emit('disconnect') : $emit('connect')"
       :class="[
         'w-full py-2.5 px-4 rounded-xl font-medium text-sm transition-all duration-300 flex items-center justify-center gap-2',
         instance.status === 'connected'
-          ? 'bg-slate-700/50 text-slate-500 cursor-not-allowed'
+          ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20 shadow-lg shadow-red-500/5'
           : 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600 shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30'
       ]"
     >
@@ -91,9 +90,9 @@
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
       </svg>
       <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
       </svg>
-      {{ instance.status === 'connected' ? 'Conectado' : 'Conectar' }}
+      {{ instance.status === 'connected' ? 'Desconectar' : 'Conectar' }}
     </button>
   </div>
 </template>
@@ -127,6 +126,7 @@ defineEmits<{
   connect: []
   delete: []
   settings: []
+  disconnect: []
 }>()
 
 const { getTagById } = useTags()
