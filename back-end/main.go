@@ -12,6 +12,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
@@ -58,8 +59,18 @@ func main() {
 
 	app := fiber.New(fiber.Config{
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
+			log.Printf("Error: %v", err)
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		},
+	})
+
+	// Recover Middleware
+	app.Use(recover.New())
+
+	// Request Logging (Simple)
+	app.Use(func(c *fiber.Ctx) error {
+		log.Printf("%s %s", c.Method(), c.Path())
+		return c.Next()
 	})
 
 	// CORS Middleware

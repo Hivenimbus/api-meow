@@ -43,12 +43,17 @@ func NewInstanceManager(dbURL string) (*InstanceManager, error) {
 
 	log.Infof("WhatsApp store initialized successfully")
 
-	return &InstanceManager{
+	manager := &InstanceManager{
 		container: container,
 		clients:   make(map[string]*WAClient),
 		log:       log,
 		ctx:       ctx,
-	}, nil
+	}
+
+	// Restore clients from database
+	manager.restoreClients()
+
+	return manager, nil
 }
 
 // GetClient returns an existing client or creates a new one for the given instance ID
@@ -103,18 +108,58 @@ func (m *InstanceManager) getOrCreateDeviceStore(instanceID string) (*store.Devi
 		return nil, err
 	}
 
-	// Look for device with matching instance ID in the devices
+	// Look for device with matching instance ID (stored in PushName)
 	for _, device := range devices {
-		// We store instance ID in the device's PushName or use JID as identifier
-		if device.ID != nil && device.ID.String() != "" {
-			// For now, we'll create new devices for each instance
-			// In production, you'd want to map instance IDs to device JIDs
+		if device.PushName == instanceID {
+			return device, nil
 		}
 	}
 
 	// Create new device store
 	deviceStore := m.container.NewDevice()
+
+	// Store instance ID in PushName for persistence mapping
+	deviceStore.PushName = instanceID
+	err = deviceStore.Save(m.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to save new device: %w", err)
+	}
+
 	return deviceStore, nil
+}
+
+// restoreClients loads existing clients from the database
+func (m *InstanceManager) restoreClients() {
+	devices, err := m.container.GetAllDevices(m.ctx)
+	if err != nil {
+		m.log.Errorf("Failed to get devices for restoration: %v", err)
+		return
+	}
+
+	count := 0
+	for _, device := range devices {
+		if device.PushName != "" {
+			instanceID := device.PushName
+
+			// Create client (this populates m.clients)
+			client, err := m.createClient(instanceID)
+			if err != nil {
+				m.log.Errorf("Failed to restore client for instance %s: %v", instanceID, err)
+				continue
+			}
+
+			// If client has session, connect it
+			if client.client.Store.ID != nil {
+				go func(id string) {
+					if _, err := m.Connect(m.ctx, id); err != nil {
+						m.log.Errorf("Failed to auto-connect instance %s: %v", id, err)
+					}
+				}(instanceID)
+			}
+			count++
+		}
+	}
+	m.log.Infof("Restored %d clients from database", count)
 }
 
 // Connect initiates the connection process for an instance
@@ -141,7 +186,8 @@ func (m *InstanceManager) Disconnect(instanceID string) error {
 	m.mu.RUnlock()
 
 	if !exists {
-		return fmt.Errorf("client not found for instance %s", instanceID)
+		// If client doesn't exist in memory, consider it already disconnected
+		return nil
 	}
 
 	client.Disconnect()
