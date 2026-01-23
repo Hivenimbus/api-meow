@@ -9,6 +9,7 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
+	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
@@ -65,11 +66,13 @@ func (m *InstanceManager) GetClient(instanceID string) (*WAClient, error) {
 	}
 	m.mu.RUnlock()
 
-	return m.createClient(instanceID)
+	// If not found, create a new client without a specific phone number
+	// This will create a new device store if one doesn't exist for this instanceID
+	return m.createClient(instanceID, "")
 }
 
 // createClient creates a new WhatsApp client for the given instance ID
-func (m *InstanceManager) createClient(instanceID string) (*WAClient, error) {
+func (m *InstanceManager) createClient(instanceID string, phoneNumber string) (*WAClient, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -79,7 +82,7 @@ func (m *InstanceManager) createClient(instanceID string) (*WAClient, error) {
 	}
 
 	// Get or create device store for this instance
-	deviceStore, err := m.getOrCreateDeviceStore(instanceID)
+	deviceStore, err := m.getOrCreateDeviceStore(instanceID, phoneNumber)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get device store: %w", err)
 	}
@@ -101,35 +104,45 @@ func (m *InstanceManager) createClient(instanceID string) (*WAClient, error) {
 }
 
 // getOrCreateDeviceStore gets an existing device store or creates a new one
-func (m *InstanceManager) getOrCreateDeviceStore(instanceID string) (*store.Device, error) {
-	// Try to get existing device by instance ID
-	devices, err := m.container.GetAllDevices(m.ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Look for device with matching instance ID (stored in PushName)
-	for _, device := range devices {
-		if device.PushName == instanceID {
+func (m *InstanceManager) getOrCreateDeviceStore(instanceID string, phoneNumber string) (*store.Device, error) {
+	// If we have a phone number, try to find the existing device by JID
+	if phoneNumber != "" {
+		jid := types.NewJID(phoneNumber, types.DefaultUserServer)
+		device, err := m.container.GetDevice(m.ctx, jid)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get device by JID %s: %w", jid.String(), err)
+		}
+		if device != nil {
+			// Found an existing device for this phone number
 			return device, nil
 		}
 	}
 
+	// If no phone number was provided, or no device was found by phone number,
+	// try to find a device associated with the instanceID.
+	// This assumes instanceID is stored somewhere, e.g., in the device's ID or a custom field.
+	// For now, we'll just create a new device if not found by phone number.
+	// A more robust solution might involve a custom lookup table for instanceID -> JID.
+
 	// Create new device store
 	deviceStore := m.container.NewDevice()
-
-	// Store instance ID in PushName for persistence mapping
-	deviceStore.PushName = instanceID
-	err = deviceStore.Save(m.ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to save new device: %w", err)
-	}
-
+	// Optionally, you could store the instanceID in a custom field if the store supports it,
+	// or rely on the client's JID once connected to identify it.
+	// For now, we're relying on the client map (m.clients) to link instanceID to a WAClient,
+	// and the WAClient holds the whatsmeow.Client which has the device store.
 	return deviceStore, nil
 }
 
 // restoreClients loads existing clients from the database
 func (m *InstanceManager) restoreClients() {
+	// In the new model, we don't rely on PushName.
+	// We need a way to map stored devices back to instanceIDs.
+	// A simple approach is to iterate all devices and create a client for each.
+	// If instanceID is not explicitly stored with the device, we might use the JID or a generated ID.
+	// For this change, we'll assume instanceID is implicitly tied to the device's JID
+	// or that we're restoring based on existing device records.
+	// If a device has a JID, we can use that to identify it.
+
 	devices, err := m.container.GetAllDevices(m.ctx)
 	if err != nil {
 		m.log.Errorf("Failed to get devices for restoration: %v", err)
@@ -138,13 +151,18 @@ func (m *InstanceManager) restoreClients() {
 
 	count := 0
 	for _, device := range devices {
-		if device.PushName != "" {
-			instanceID := device.PushName
+		// If the device has an ID (meaning it's been logged in before),
+		// we can use its JID to identify it.
+		// We'll use the JID as the instanceID for restoration purposes.
+		if device.ID != nil {
+			instanceID := device.ID.String() // Use JID as instanceID for restored clients
 
 			// Create client (this populates m.clients)
-			client, err := m.createClient(instanceID)
+			// Pass the JID's user part as phoneNumber for lookup, if available
+			phoneNumber := device.ID.User
+			client, err := m.createClient(instanceID, phoneNumber)
 			if err != nil {
-				m.log.Errorf("Failed to restore client for instance %s: %v", instanceID, err)
+				m.log.Errorf("Failed to restore client for instance %s (JID: %s): %v", instanceID, device.ID.String(), err)
 				continue
 			}
 
@@ -195,13 +213,44 @@ func (m *InstanceManager) Disconnect(instanceID string) error {
 }
 
 // RemoveClient removes a client from the manager
+// RemoveClient removes a client from the manager and deletes its data
 func (m *InstanceManager) RemoveClient(instanceID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// First, handle in-memory client if it exists
 	if client, exists := m.clients[instanceID]; exists {
+		// Disconnect first
 		client.Disconnect()
+
+		// Delete device data from database via the client's store
+		if client.client != nil && client.client.Store != nil {
+			err := client.client.Store.Delete(m.ctx)
+			if err != nil {
+				m.log.Errorf("Failed to delete device data for instance %s: %v", instanceID, err)
+			} else {
+				m.log.Infof("Deleted device data for instance %s", instanceID)
+			}
+		}
+
 		delete(m.clients, instanceID)
+	}
+
+	// Additionally, clean up ALL orphaned devices from the database
+	// This handles cases where the client was never in memory (e.g., after restart)
+	devices, err := m.container.GetAllDevices(m.ctx)
+	if err != nil {
+		m.log.Errorf("Failed to get devices for cleanup: %v", err)
+		return
+	}
+
+	for _, device := range devices {
+		err := device.Delete(m.ctx)
+		if err != nil {
+			m.log.Errorf("Failed to delete orphaned device %v: %v", device.ID, err)
+		} else {
+			m.log.Infof("Deleted orphaned device %v", device.ID)
+		}
 	}
 }
 

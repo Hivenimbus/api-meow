@@ -200,6 +200,38 @@
       </template>
     </Modal>
 
+    <!-- Disconnect Confirmation Modal -->
+    <Modal v-model="showDisconnectModal" title="Desconectar Instância" size="sm">
+      <div class="text-center">
+        <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-amber-500/10 flex items-center justify-center">
+          <svg class="w-8 h-8 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        </div>
+        <h4 class="text-lg font-semibold text-white mb-2">Desconectar?</h4>
+        <p class="text-slate-400 text-sm">
+          Deseja realmente desconectar a instância <strong class="text-white">{{ instanceToDisconnect?.name }}</strong>?
+        </p>
+      </div>
+      <template #footer>
+        <div class="flex gap-3 justify-end">
+          <button
+            @click="showDisconnectModal = false"
+            class="px-4 py-2 text-slate-300 hover:text-white transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            @click="confirmDisconnect"
+            :disabled="saving"
+            class="px-5 py-2 bg-amber-500 text-white font-medium rounded-xl hover:bg-amber-600 transition-all disabled:opacity-50"
+          >
+            {{ saving ? 'Desconectando...' : 'Desconectar' }}
+          </button>
+        </div>
+      </template>
+    </Modal>
+    
     <!-- Delete Confirmation Modal -->
     <Modal v-model="showDeleteModal" title="Excluir Instância" size="sm">
       <div class="text-center">
@@ -375,9 +407,11 @@ const selectedTagFilter = ref('')
 const showAddModal = ref(false)
 const showDeleteModal = ref(false)
 const showConnectModal = ref(false)
+const showDisconnectModal = ref(false)
 const showSettingsModal = ref(false)
 const instanceToDelete = ref<Instance | null>(null)
 const instanceToConnect = ref<Instance | null>(null)
+const instanceToDisconnect = ref<Instance | null>(null)
 const instanceToEdit = ref<Instance | null>(null)
 const loading = ref(true)
 const saving = ref(false)
@@ -661,17 +695,33 @@ const closeConnectModal = () => {
   qrCode.value = ''
 }
 
-const handleDisconnect = async (instance: Instance) => {
-  if (!confirm(`Deseja desconectar a instância ${instance.name}?`)) return
+const handleDisconnect = (instance: Instance) => {
+  instanceToDisconnect.value = instance
+  showDisconnectModal.value = true
+}
 
+const confirmDisconnect = async () => {
+  if (!instanceToDisconnect.value) return
+  
+  saving.value = true
   try {
-    await api.disconnectInstance(instance.name)
-    instance.status = 'disconnected'
-    instance.phoneNumber = undefined
+    await api.disconnectInstance(instanceToDisconnect.value.name)
+    
+    // Update local state
+    const instance = instances.value.find(i => i.id === instanceToDisconnect.value?.id)
+    if (instance) {
+      instance.status = 'disconnected'
+      instance.phoneNumber = undefined
+    }
+    
     success('Instância desconectada com sucesso')
+    showDisconnectModal.value = false
+    instanceToDisconnect.value = null
   } catch (e) {
     error('Erro ao desconectar instância')
     console.error(e)
+  } finally {
+    saving.value = false
   }
 }
 </script>
