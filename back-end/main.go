@@ -375,8 +375,8 @@ func main() {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
 		}
 
-		if body.To == "" || body.MediaType == "" || body.MimeType == "" {
-			return c.Status(400).JSON(fiber.Map{"error": "to, mediaType, and mimeType are required"})
+		if body.To == "" || body.MediaType == "" {
+			return c.Status(400).JSON(fiber.Map{"error": "to and mediaType are required"})
 		}
 
 		if body.Base64Data == "" && body.URL == "" {
@@ -410,17 +410,23 @@ func main() {
 			}
 		}
 
+		// Auto-detect mimeType if not provided
+		mimeType := body.MimeType
+		if mimeType == "" {
+			mimeType = http.DetectContentType(mediaData)
+		}
+
 		var resp *whatsapp.SendResponse
 
 		switch body.MediaType {
 		case "image":
-			resp, err = waManager.SendImageMessage(name, body.To, mediaData, body.MimeType, body.Caption)
+			resp, err = waManager.SendImageMessage(name, body.To, mediaData, mimeType, body.Caption)
 		case "video":
-			resp, err = waManager.SendVideoMessage(name, body.To, mediaData, body.MimeType, body.Caption)
+			resp, err = waManager.SendVideoMessage(name, body.To, mediaData, mimeType, body.Caption)
 		case "audio":
-			resp, err = waManager.SendAudioMessage(name, body.To, mediaData, body.MimeType, body.SimulateRecording, body.RecordingDuration, body.PTT)
+			resp, err = waManager.SendAudioMessage(name, body.To, mediaData, mimeType, body.SimulateRecording, body.RecordingDuration, body.PTT)
 		case "document":
-			resp, err = waManager.SendDocumentMessage(name, body.To, mediaData, body.MimeType, body.FileName, body.Caption)
+			resp, err = waManager.SendDocumentMessage(name, body.To, mediaData, mimeType, body.FileName, body.Caption)
 		default:
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid mediaType. Must be: image, video, audio, or document"})
 		}
