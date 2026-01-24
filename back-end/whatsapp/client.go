@@ -235,6 +235,11 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 		return
 	}
 
+	// Ignore messages from newsletters/channels
+	if msg.Info.Chat.Server == "newsletter" {
+		return
+	}
+
 	// Check if it's a group message
 	isGroup := msg.Info.IsGroup
 	if ignoreGroups && isGroup {
