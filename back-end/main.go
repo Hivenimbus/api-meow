@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"api-meow/internal/db"
@@ -72,31 +73,45 @@ func main() {
 			var instanceInfos []whatsapp.InstanceInfo
 			for _, inst := range connectedInstances {
 				if inst.PhoneNumber.Valid && inst.PhoneNumber.String != "" {
-					instanceInfos = append(instanceInfos, whatsapp.InstanceInfo{
+					info := whatsapp.InstanceInfo{
 						Name:        inst.Name,
 						PhoneNumber: inst.PhoneNumber.String,
-					})
+					}
+					if inst.WebhookUrl.Valid {
+						info.WebhookURL = inst.WebhookUrl.String
+					}
+					if inst.IgnoreGroups.Valid {
+						info.IgnoreGroups = inst.IgnoreGroups.Bool
+					}
+					instanceInfos = append(instanceInfos, info)
 				}
 			}
 
 			// Restore clients using correct name mapping
 			waManager.RestoreClients(instanceInfos)
 
-			// Auto-reconnect restored instances
+			// Auto-reconnect restored instances IN PARALLEL
+			var wg sync.WaitGroup
 			for _, inst := range instanceInfos {
-				log.Printf("Auto-reconnecting instance: %s", inst.Name)
-				_, err := waManager.Connect(context.Background(), inst.Name)
-				if err != nil {
-					log.Printf("Failed to auto-reconnect instance %s: %v", inst.Name, err)
-					// Update status in database
-					queries.UpdateInstanceStatusByName(context.Background(), db.UpdateInstanceStatusByNameParams{
-						Name:   inst.Name,
-						Status: "disconnected",
-					})
-				} else {
-					log.Printf("Successfully auto-reconnected instance: %s", inst.Name)
-				}
+				wg.Add(1)
+				go func(instanceName string) {
+					defer wg.Done()
+					log.Printf("Auto-reconnecting instance: %s", instanceName)
+					_, err := waManager.Connect(context.Background(), instanceName)
+					if err != nil {
+						log.Printf("Failed to auto-reconnect instance %s: %v", instanceName, err)
+						// Update status in database
+						queries.UpdateInstanceStatusByName(context.Background(), db.UpdateInstanceStatusByNameParams{
+							Name:   instanceName,
+							Status: "disconnected",
+						})
+					} else {
+						log.Printf("Successfully auto-reconnected instance: %s", instanceName)
+					}
+				}(inst.Name)
 			}
+			wg.Wait()
+			log.Printf("All instances reconnection completed")
 		}()
 	}
 
@@ -258,7 +273,7 @@ func main() {
 		name := c.Params("name")
 
 		// Verify instance exists
-		_, err := queries.GetInstanceByName(c.Context(), name)
+		instance, err := queries.GetInstanceByName(c.Context(), name)
 		if err != nil {
 			return c.Status(404).JSON(fiber.Map{"error": "Instance not found"})
 		}
@@ -270,6 +285,14 @@ func main() {
 		client, err := waManager.Connect(ctx, name)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		// Configure webhook and settings
+		if instance.WebhookUrl.Valid {
+			client.SetWebhook(instance.WebhookUrl.String)
+		}
+		if instance.IgnoreGroups.Valid {
+			client.SetIgnoreGroups(instance.IgnoreGroups.Bool)
 		}
 
 		// Update instance status to connecting
@@ -391,6 +414,99 @@ func main() {
 		})
 	})
 
+	// Send text message batch endpoint - uses worker pool for parallel processing
+	api.Post("/instances/:name/send-message-batch", func(c *fiber.Ctx) error {
+		if waManager == nil {
+			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
+		}
+
+		name := c.Params("name")
+
+		var body struct {
+			Messages []struct {
+				To             string `json:"to"`
+				Text           string `json:"text"`
+				SimulateTyping bool   `json:"simulateTyping"`
+				TypingDuration int    `json:"typingDuration"`
+			} `json:"messages"`
+			MaxWorkers int `json:"maxWorkers"` // Number of parallel workers (default: 5)
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
+		}
+
+		if len(body.Messages) == 0 {
+			return c.Status(400).JSON(fiber.Map{"error": "messages array is required"})
+		}
+
+		maxWorkers := body.MaxWorkers
+		if maxWorkers <= 0 {
+			maxWorkers = 5
+		}
+		if maxWorkers > 20 {
+			maxWorkers = 20
+		}
+
+		type BatchResult struct {
+			Index     int    `json:"index"`
+			To        string `json:"to"`
+			MessageID string `json:"messageId,omitempty"`
+			Error     string `json:"error,omitempty"`
+			Success   bool   `json:"success"`
+		}
+
+		results := make([]BatchResult, len(body.Messages))
+		var wg sync.WaitGroup
+		semaphore := make(chan struct{}, maxWorkers)
+
+		for i, msg := range body.Messages {
+			wg.Add(1)
+			go func(idx int, message struct {
+				To             string `json:"to"`
+				Text           string `json:"text"`
+				SimulateTyping bool   `json:"simulateTyping"`
+				TypingDuration int    `json:"typingDuration"`
+			}) {
+				defer wg.Done()
+				semaphore <- struct{}{}
+				defer func() { <-semaphore }()
+
+				result := BatchResult{Index: idx, To: message.To}
+
+				if message.To == "" || message.Text == "" {
+					result.Error = "to and text are required"
+					results[idx] = result
+					return
+				}
+
+				resp, err := waManager.SendTextMessage(name, message.To, message.Text, message.SimulateTyping, message.TypingDuration)
+				if err != nil {
+					result.Error = err.Error()
+				} else {
+					result.Success = true
+					result.MessageID = resp.MessageID
+				}
+				results[idx] = result
+			}(i, msg)
+		}
+
+		wg.Wait()
+
+		successCount := 0
+		for _, r := range results {
+			if r.Success {
+				successCount++
+			}
+		}
+
+		return c.JSON(fiber.Map{
+			"total":   len(body.Messages),
+			"success": successCount,
+			"failed":  len(body.Messages) - successCount,
+			"results": results,
+		})
+	})
+
 	// Send media endpoint
 	api.Post("/instances/:name/send-media", func(c *fiber.Ctx) error {
 		if waManager == nil {
@@ -478,6 +594,177 @@ func main() {
 		return c.JSON(fiber.Map{
 			"messageId": resp.MessageID,
 			"timestamp": resp.Timestamp.Format(time.RFC3339),
+		})
+	})
+
+	// Send media batch endpoint - uses worker pool for parallel processing
+	api.Post("/instances/:name/send-media-batch", func(c *fiber.Ctx) error {
+		if waManager == nil {
+			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
+		}
+
+		name := c.Params("name")
+
+		var body struct {
+			Messages []struct {
+				To                string `json:"to"`
+				MediaType         string `json:"mediaType"`
+				Base64Data        string `json:"base64Data"`
+				URL               string `json:"url"`
+				MimeType          string `json:"mimeType"`
+				Caption           string `json:"caption"`
+				FileName          string `json:"fileName"`
+				SimulateRecording bool   `json:"simulateRecording"`
+				RecordingDuration int    `json:"recordingDuration"`
+				PTT               bool   `json:"ptt"`
+			} `json:"messages"`
+			MaxWorkers int `json:"maxWorkers"` // Number of parallel workers (default: 5)
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
+		}
+
+		if len(body.Messages) == 0 {
+			return c.Status(400).JSON(fiber.Map{"error": "messages array is required"})
+		}
+
+		// Set default max workers
+		maxWorkers := body.MaxWorkers
+		if maxWorkers <= 0 {
+			maxWorkers = 5
+		}
+		if maxWorkers > 20 {
+			maxWorkers = 20 // Cap at 20 workers
+		}
+
+		// Results channel
+		type BatchResult struct {
+			Index     int    `json:"index"`
+			To        string `json:"to"`
+			MessageID string `json:"messageId,omitempty"`
+			Error     string `json:"error,omitempty"`
+			Success   bool   `json:"success"`
+		}
+
+		results := make([]BatchResult, len(body.Messages))
+		var wg sync.WaitGroup
+		semaphore := make(chan struct{}, maxWorkers)
+
+		for i, msg := range body.Messages {
+			wg.Add(1)
+			go func(idx int, message struct {
+				To                string `json:"to"`
+				MediaType         string `json:"mediaType"`
+				Base64Data        string `json:"base64Data"`
+				URL               string `json:"url"`
+				MimeType          string `json:"mimeType"`
+				Caption           string `json:"caption"`
+				FileName          string `json:"fileName"`
+				SimulateRecording bool   `json:"simulateRecording"`
+				RecordingDuration int    `json:"recordingDuration"`
+				PTT               bool   `json:"ptt"`
+			}) {
+				defer wg.Done()
+				semaphore <- struct{}{}        // Acquire
+				defer func() { <-semaphore }() // Release
+
+				result := BatchResult{Index: idx, To: message.To}
+
+				// Validate
+				if message.To == "" || message.MediaType == "" {
+					result.Error = "to and mediaType are required"
+					results[idx] = result
+					return
+				}
+
+				if message.Base64Data == "" && message.URL == "" {
+					result.Error = "Either base64Data or url must be provided"
+					results[idx] = result
+					return
+				}
+
+				// Get media data
+				var mediaData []byte
+				var err error
+
+				if message.URL != "" {
+					httpResp, err := http.Get(message.URL)
+					if err != nil {
+						result.Error = "Failed to download: " + err.Error()
+						results[idx] = result
+						return
+					}
+					defer httpResp.Body.Close()
+
+					if httpResp.StatusCode != http.StatusOK {
+						result.Error = "Download failed: HTTP " + httpResp.Status
+						results[idx] = result
+						return
+					}
+
+					mediaData, err = io.ReadAll(httpResp.Body)
+					if err != nil {
+						result.Error = "Failed to read response: " + err.Error()
+						results[idx] = result
+						return
+					}
+				} else {
+					mediaData, err = base64.StdEncoding.DecodeString(message.Base64Data)
+					if err != nil {
+						result.Error = "Invalid base64 data"
+						results[idx] = result
+						return
+					}
+				}
+
+				// Auto-detect mimeType
+				mimeType := message.MimeType
+				if mimeType == "" {
+					mimeType = http.DetectContentType(mediaData)
+				}
+
+				// Send message
+				var resp *whatsapp.SendResponse
+				switch message.MediaType {
+				case "image":
+					resp, err = waManager.SendImageMessage(name, message.To, mediaData, mimeType, message.Caption)
+				case "video":
+					resp, err = waManager.SendVideoMessage(name, message.To, mediaData, mimeType, message.Caption)
+				case "audio":
+					resp, err = waManager.SendAudioMessage(name, message.To, mediaData, mimeType, message.SimulateRecording, message.RecordingDuration, message.PTT)
+				case "document":
+					resp, err = waManager.SendDocumentMessage(name, message.To, mediaData, mimeType, message.FileName, message.Caption)
+				default:
+					result.Error = "Invalid mediaType"
+					results[idx] = result
+					return
+				}
+
+				if err != nil {
+					result.Error = err.Error()
+				} else {
+					result.Success = true
+					result.MessageID = resp.MessageID
+				}
+				results[idx] = result
+			}(i, msg)
+		}
+
+		wg.Wait()
+
+		// Count successes
+		successCount := 0
+		for _, r := range results {
+			if r.Success {
+				successCount++
+			}
+		}
+
+		return c.JSON(fiber.Map{
+			"total":   len(body.Messages),
+			"success": successCount,
+			"failed":  len(body.Messages) - successCount,
+			"results": results,
 		})
 	})
 

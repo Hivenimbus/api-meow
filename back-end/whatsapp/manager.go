@@ -56,17 +56,19 @@ func NewInstanceManager(dbURL string) (*InstanceManager, error) {
 
 // InstanceInfo contains info for restoring a client
 type InstanceInfo struct {
-	Name        string
-	PhoneNumber string
+	Name         string
+	PhoneNumber  string
+	WebhookURL   string
+	IgnoreGroups bool
 }
 
 // RestoreClients restores clients from database using instance info from the app database
 func (m *InstanceManager) RestoreClients(instances []InstanceInfo) {
-	// Build a map of phone number -> instance name
-	phoneToName := make(map[string]string)
+	// Build a map of phone number -> instance info
+	phoneToInfo := make(map[string]InstanceInfo)
 	for _, inst := range instances {
 		if inst.PhoneNumber != "" {
-			phoneToName[inst.PhoneNumber] = inst.Name
+			phoneToInfo[inst.PhoneNumber] = inst
 		}
 	}
 
@@ -85,21 +87,27 @@ func (m *InstanceManager) RestoreClients(instances []InstanceInfo) {
 		// Get the phone number from the device JID
 		phoneNumber := device.ID.User
 
-		// Find the instance name for this phone number
-		instanceName, found := phoneToName[phoneNumber]
+		// Find the instance info for this phone number
+		instanceInfo, found := phoneToInfo[phoneNumber]
 		if !found {
 			m.log.Warnf("No instance found for phone %s, skipping device", phoneNumber)
 			continue
 		}
 
 		// Create client with the correct instance name
-		client, err := m.createClientWithDevice(instanceName, device)
+		client, err := m.createClientWithDevice(instanceInfo.Name, device)
 		if err != nil {
-			m.log.Errorf("Failed to restore client for instance %s: %v", instanceName, err)
+			m.log.Errorf("Failed to restore client for instance %s: %v", instanceInfo.Name, err)
 			continue
 		}
 
-		m.log.Infof("Restored client for instance %s (phone: %s)", instanceName, phoneNumber)
+		// Configure settings
+		if instanceInfo.WebhookURL != "" {
+			client.SetWebhook(instanceInfo.WebhookURL)
+		}
+		client.SetIgnoreGroups(instanceInfo.IgnoreGroups)
+
+		m.log.Infof("Restored client for instance %s (phone: %s)", instanceInfo.Name, phoneNumber)
 		count++
 
 		// Return the instance name so caller can reconnect

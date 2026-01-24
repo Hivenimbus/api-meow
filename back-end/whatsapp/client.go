@@ -17,12 +17,14 @@ import (
 
 // WAClient wraps a whatsmeow client with additional functionality
 type WAClient struct {
-	instanceID string
-	client     *whatsmeow.Client
-	qrCode     string
-	status     string // disconnected, connecting, connected
-	phone      string
-	mu         sync.RWMutex
+	instanceID   string
+	client       *whatsmeow.Client
+	qrCode       string
+	status       string // disconnected, connecting, connected
+	phone        string
+	webhookURL   string
+	ignoreGroups bool
+	mu           sync.RWMutex
 
 	// Channels for events
 	QRCodeChan    chan string
@@ -145,6 +147,7 @@ func (w *WAClient) eventHandler(evt interface{}) {
 		if w.client.Store.ID != nil {
 			w.phone = w.client.Store.ID.User
 		}
+		webhookURL := w.webhookURL
 		w.mu.Unlock()
 
 		select {
@@ -152,18 +155,58 @@ func (w *WAClient) eventHandler(evt interface{}) {
 		default:
 		}
 
+		// Send webhook event
+		if webhookURL != "" {
+			GetWebhookSender().SendEventAsync(webhookURL, WebhookEvent{
+				Event:     "connection.connected",
+				Instance:  w.instanceID,
+				Timestamp: time.Now().Format(time.RFC3339),
+				Data: StatusData{
+					Status:      "connected",
+					PhoneNumber: w.phone,
+				},
+			})
+		}
+
 	case *events.Disconnected:
 		w.mu.Lock()
 		w.status = "disconnected"
 		w.qrCode = ""
+		webhookURL := w.webhookURL
 		w.mu.Unlock()
+
+		// Send webhook event
+		if webhookURL != "" {
+			GetWebhookSender().SendEventAsync(webhookURL, WebhookEvent{
+				Event:     "connection.disconnected",
+				Instance:  w.instanceID,
+				Timestamp: time.Now().Format(time.RFC3339),
+				Data: StatusData{
+					Status: "disconnected",
+				},
+			})
+		}
 
 	case *events.LoggedOut:
 		w.mu.Lock()
 		w.status = "disconnected"
 		w.phone = ""
 		w.qrCode = ""
+		webhookURL := w.webhookURL
 		w.mu.Unlock()
+
+		// Send webhook event
+		if webhookURL != "" {
+			GetWebhookSender().SendEventAsync(webhookURL, WebhookEvent{
+				Event:     "connection.logged_out",
+				Instance:  w.instanceID,
+				Timestamp: time.Now().Format(time.RFC3339),
+				Data: StatusData{
+					Status: "logged_out",
+					Reason: "Logged out from another device",
+				},
+			})
+		}
 
 	case *events.PairSuccess:
 		w.mu.Lock()
@@ -174,7 +217,118 @@ func (w *WAClient) eventHandler(evt interface{}) {
 
 	case *events.StreamError:
 		w.ErrorChan <- fmt.Errorf("stream error: %s", v.Code)
+
+	case *events.Message:
+		w.handleIncomingMessage(v)
 	}
+}
+
+// handleIncomingMessage processes incoming messages and sends to webhook
+func (w *WAClient) handleIncomingMessage(msg *events.Message) {
+	w.mu.RLock()
+	webhookURL := w.webhookURL
+	ignoreGroups := w.ignoreGroups
+	w.mu.RUnlock()
+
+	// Skip if no webhook configured
+	if webhookURL == "" {
+		return
+	}
+
+	// Check if it's a group message
+	isGroup := msg.Info.IsGroup
+	if ignoreGroups && isGroup {
+		return
+	}
+
+	// Build message data
+	msgData := MessageData{
+		From:      msg.Info.Sender.User,
+		MessageID: msg.Info.ID,
+		IsGroup:   isGroup,
+		Timestamp: msg.Info.Timestamp.Unix(),
+	}
+
+	// Get sender name from contact store if available
+	if msg.Info.PushName != "" {
+		msgData.FromName = msg.Info.PushName
+	}
+
+	// Set group info if applicable
+	if isGroup {
+		msgData.GroupID = msg.Info.Chat.User
+		// Try to get group name from store
+		if groupInfo, err := w.client.GetGroupInfo(context.Background(), msg.Info.Chat); err == nil {
+			msgData.GroupName = groupInfo.Name
+		}
+	}
+
+	// Determine message type and content
+	message := msg.Message
+	if message == nil {
+		return
+	}
+
+	if message.Conversation != nil {
+		msgData.MessageType = "text"
+		msgData.Text = *message.Conversation
+	} else if message.ExtendedTextMessage != nil {
+		msgData.MessageType = "text"
+		if message.ExtendedTextMessage.Text != nil {
+			msgData.Text = *message.ExtendedTextMessage.Text
+		}
+	} else if message.ImageMessage != nil {
+		msgData.MessageType = "image"
+		if message.ImageMessage.Caption != nil {
+			msgData.Caption = *message.ImageMessage.Caption
+		}
+		if message.ImageMessage.Mimetype != nil {
+			msgData.MimeType = *message.ImageMessage.Mimetype
+		}
+	} else if message.VideoMessage != nil {
+		msgData.MessageType = "video"
+		if message.VideoMessage.Caption != nil {
+			msgData.Caption = *message.VideoMessage.Caption
+		}
+		if message.VideoMessage.Mimetype != nil {
+			msgData.MimeType = *message.VideoMessage.Mimetype
+		}
+	} else if message.AudioMessage != nil {
+		msgData.MessageType = "audio"
+		if message.AudioMessage.Mimetype != nil {
+			msgData.MimeType = *message.AudioMessage.Mimetype
+		}
+	} else if message.DocumentMessage != nil {
+		msgData.MessageType = "document"
+		if message.DocumentMessage.Caption != nil {
+			msgData.Caption = *message.DocumentMessage.Caption
+		}
+		if message.DocumentMessage.Mimetype != nil {
+			msgData.MimeType = *message.DocumentMessage.Mimetype
+		}
+	} else if message.StickerMessage != nil {
+		msgData.MessageType = "sticker"
+		if message.StickerMessage.Mimetype != nil {
+			msgData.MimeType = *message.StickerMessage.Mimetype
+		}
+	} else if message.ContactMessage != nil {
+		msgData.MessageType = "contact"
+		if message.ContactMessage.DisplayName != nil {
+			msgData.Text = *message.ContactMessage.DisplayName
+		}
+	} else if message.LocationMessage != nil {
+		msgData.MessageType = "location"
+	} else {
+		msgData.MessageType = "unknown"
+	}
+
+	// Send to webhook asynchronously
+	GetWebhookSender().SendEventAsync(webhookURL, WebhookEvent{
+		Event:     "message.received",
+		Instance:  w.instanceID,
+		Timestamp: time.Now().Format(time.RFC3339),
+		Data:      msgData,
+	})
 }
 
 // Disconnect disconnects from WhatsApp
@@ -216,6 +370,27 @@ func (w *WAClient) GetStatus() (string, string) {
 // IsConnected returns whether the client is connected
 func (w *WAClient) IsConnected() bool {
 	return w.client.IsConnected()
+}
+
+// SetWebhook sets the webhook URL for this client
+func (w *WAClient) SetWebhook(url string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.webhookURL = url
+}
+
+// SetIgnoreGroups sets whether to ignore group messages
+func (w *WAClient) SetIgnoreGroups(ignore bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.ignoreGroups = ignore
+}
+
+// GetWebhookURL returns the current webhook URL
+func (w *WAClient) GetWebhookURL() string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.webhookURL
 }
 
 // WaitForConnection waits for connection with timeout
