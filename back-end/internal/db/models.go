@@ -88,6 +88,13 @@ type WhatsmeowIdentityKey struct {
 	Content  []byte
 }
 
+type WhatsmeowLidLookup struct {
+	OurJid   string
+	TheirJid string
+	Lid      string
+	Server   string
+}
+
 type WhatsmeowPreKey struct {
 	OurJid     string
 	KeyID      int32

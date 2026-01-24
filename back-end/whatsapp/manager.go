@@ -51,10 +51,87 @@ func NewInstanceManager(dbURL string) (*InstanceManager, error) {
 		ctx:       ctx,
 	}
 
-	// Restore clients from database
-	manager.restoreClients()
-
 	return manager, nil
+}
+
+// InstanceInfo contains info for restoring a client
+type InstanceInfo struct {
+	Name        string
+	PhoneNumber string
+}
+
+// RestoreClients restores clients from database using instance info from the app database
+func (m *InstanceManager) RestoreClients(instances []InstanceInfo) {
+	// Build a map of phone number -> instance name
+	phoneToName := make(map[string]string)
+	for _, inst := range instances {
+		if inst.PhoneNumber != "" {
+			phoneToName[inst.PhoneNumber] = inst.Name
+		}
+	}
+
+	devices, err := m.container.GetAllDevices(m.ctx)
+	if err != nil {
+		m.log.Errorf("Failed to get devices for restoration: %v", err)
+		return
+	}
+
+	count := 0
+	for _, device := range devices {
+		if device.ID == nil {
+			continue
+		}
+
+		// Get the phone number from the device JID
+		phoneNumber := device.ID.User
+
+		// Find the instance name for this phone number
+		instanceName, found := phoneToName[phoneNumber]
+		if !found {
+			m.log.Warnf("No instance found for phone %s, skipping device", phoneNumber)
+			continue
+		}
+
+		// Create client with the correct instance name
+		client, err := m.createClientWithDevice(instanceName, device)
+		if err != nil {
+			m.log.Errorf("Failed to restore client for instance %s: %v", instanceName, err)
+			continue
+		}
+
+		m.log.Infof("Restored client for instance %s (phone: %s)", instanceName, phoneNumber)
+		count++
+
+		// Return the instance name so caller can reconnect
+		_ = client
+	}
+
+	m.log.Infof("Restored %d clients from database", count)
+}
+
+// createClientWithDevice creates a client using an existing device store
+func (m *InstanceManager) createClientWithDevice(instanceID string, deviceStore *store.Device) (*WAClient, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Check if already exists
+	if client, exists := m.clients[instanceID]; exists {
+		return client, nil
+	}
+
+	// Create whatsmeow client with the existing device
+	shortID := instanceID
+	if len(instanceID) > 8 {
+		shortID = instanceID[:8]
+	}
+	clientLog := waLog.Stdout("Client-"+shortID, "INFO", true)
+	waClient := whatsmeow.NewClient(deviceStore, clientLog)
+
+	// Create our wrapper
+	client := NewWAClient(instanceID, waClient)
+	m.clients[instanceID] = client
+
+	return client, nil
 }
 
 // GetClient returns an existing client or creates a new one for the given instance ID
@@ -131,53 +208,6 @@ func (m *InstanceManager) getOrCreateDeviceStore(instanceID string, phoneNumber 
 	// For now, we're relying on the client map (m.clients) to link instanceID to a WAClient,
 	// and the WAClient holds the whatsmeow.Client which has the device store.
 	return deviceStore, nil
-}
-
-// restoreClients loads existing clients from the database
-func (m *InstanceManager) restoreClients() {
-	// In the new model, we don't rely on PushName.
-	// We need a way to map stored devices back to instanceIDs.
-	// A simple approach is to iterate all devices and create a client for each.
-	// If instanceID is not explicitly stored with the device, we might use the JID or a generated ID.
-	// For this change, we'll assume instanceID is implicitly tied to the device's JID
-	// or that we're restoring based on existing device records.
-	// If a device has a JID, we can use that to identify it.
-
-	devices, err := m.container.GetAllDevices(m.ctx)
-	if err != nil {
-		m.log.Errorf("Failed to get devices for restoration: %v", err)
-		return
-	}
-
-	count := 0
-	for _, device := range devices {
-		// If the device has an ID (meaning it's been logged in before),
-		// we can use its JID to identify it.
-		// We'll use the JID as the instanceID for restoration purposes.
-		if device.ID != nil {
-			instanceID := device.ID.String() // Use JID as instanceID for restored clients
-
-			// Create client (this populates m.clients)
-			// Pass the JID's user part as phoneNumber for lookup, if available
-			phoneNumber := device.ID.User
-			client, err := m.createClient(instanceID, phoneNumber)
-			if err != nil {
-				m.log.Errorf("Failed to restore client for instance %s (JID: %s): %v", instanceID, device.ID.String(), err)
-				continue
-			}
-
-			// If client has session, connect it
-			if client.client.Store.ID != nil {
-				go func(id string) {
-					if _, err := m.Connect(m.ctx, id); err != nil {
-						m.log.Errorf("Failed to auto-connect instance %s: %v", id, err)
-					}
-				}(instanceID)
-			}
-			count++
-		}
-	}
-	m.log.Infof("Restored %d clients from database", count)
 }
 
 // Connect initiates the connection process for an instance

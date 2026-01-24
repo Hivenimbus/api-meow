@@ -75,3 +75,11 @@ RETURNING *;
 -- name: DeleteTag :exec
 DELETE FROM tags
 WHERE id = $1;
+
+-- name: GetInstanceByPhoneNumber :one
+SELECT * FROM instances
+WHERE phone_number = $1 AND status = 'connected' LIMIT 1;
+
+-- name: ListConnectedInstances :many
+SELECT * FROM instances
+WHERE status = 'connected';

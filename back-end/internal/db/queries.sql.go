@@ -154,6 +154,29 @@ func (q *Queries) GetInstanceByName(ctx context.Context, name string) (Instance,
 	return i, err
 }
 
+const getInstanceByPhoneNumber = `-- name: GetInstanceByPhoneNumber :one
+SELECT id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at FROM instances
+WHERE phone_number = $1 AND status = 'connected' LIMIT 1
+`
+
+func (q *Queries) GetInstanceByPhoneNumber(ctx context.Context, phoneNumber pgtype.Text) (Instance, error) {
+	row := q.db.QueryRow(ctx, getInstanceByPhoneNumber, phoneNumber)
+	var i Instance
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Status,
+		&i.PhoneNumber,
+		&i.TagID,
+		&i.IgnoreGroups,
+		&i.WebhookUrl,
+		&i.ReceiveMessages,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getTag = `-- name: GetTag :one
 SELECT id, name, color, created_at FROM tags
 WHERE id = $1 LIMIT 1
@@ -169,6 +192,42 @@ func (q *Queries) GetTag(ctx context.Context, id pgtype.UUID) (Tag, error) {
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const listConnectedInstances = `-- name: ListConnectedInstances :many
+SELECT id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at FROM instances
+WHERE status = 'connected'
+`
+
+func (q *Queries) ListConnectedInstances(ctx context.Context) ([]Instance, error) {
+	rows, err := q.db.Query(ctx, listConnectedInstances)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Instance
+	for rows.Next() {
+		var i Instance
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Status,
+			&i.PhoneNumber,
+			&i.TagID,
+			&i.IgnoreGroups,
+			&i.WebhookUrl,
+			&i.ReceiveMessages,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listInstances = `-- name: ListInstances :many

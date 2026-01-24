@@ -58,6 +58,46 @@ func main() {
 	} else {
 		defer waManager.Close()
 		log.Println("WhatsApp manager initialized successfully")
+
+		// Restore and auto-reconnect instances that were connected before restart
+		go func() {
+			// Get all connected instances from database
+			connectedInstances, err := queries.ListConnectedInstances(context.Background())
+			if err != nil {
+				log.Printf("Warning: Failed to get connected instances: %v", err)
+				return
+			}
+
+			// Build instance info list for restoration
+			var instanceInfos []whatsapp.InstanceInfo
+			for _, inst := range connectedInstances {
+				if inst.PhoneNumber.Valid && inst.PhoneNumber.String != "" {
+					instanceInfos = append(instanceInfos, whatsapp.InstanceInfo{
+						Name:        inst.Name,
+						PhoneNumber: inst.PhoneNumber.String,
+					})
+				}
+			}
+
+			// Restore clients using correct name mapping
+			waManager.RestoreClients(instanceInfos)
+
+			// Auto-reconnect restored instances
+			for _, inst := range instanceInfos {
+				log.Printf("Auto-reconnecting instance: %s", inst.Name)
+				_, err := waManager.Connect(context.Background(), inst.Name)
+				if err != nil {
+					log.Printf("Failed to auto-reconnect instance %s: %v", inst.Name, err)
+					// Update status in database
+					queries.UpdateInstanceStatusByName(context.Background(), db.UpdateInstanceStatusByNameParams{
+						Name:   inst.Name,
+						Status: "disconnected",
+					})
+				} else {
+					log.Printf("Successfully auto-reconnected instance: %s", inst.Name)
+				}
+			}
+		}()
 	}
 
 	app := fiber.New(fiber.Config{
