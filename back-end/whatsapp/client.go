@@ -24,6 +24,7 @@ type WAClient struct {
 	phone        string
 	webhookURL   string
 	ignoreGroups bool
+	connectedAt  time.Time // Track when client connected to filter offline messages
 	mu           sync.RWMutex
 
 	// Channels for events
@@ -144,6 +145,7 @@ func (w *WAClient) eventHandler(evt interface{}) {
 	case *events.Connected:
 		w.mu.Lock()
 		w.status = "connected"
+		w.connectedAt = time.Now() // Track connection time to filter offline messages
 		if w.client.Store.ID != nil {
 			w.phone = w.client.Store.ID.User
 		}
@@ -228,6 +230,7 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 	w.mu.RLock()
 	webhookURL := w.webhookURL
 	ignoreGroups := w.ignoreGroups
+	connectedAt := w.connectedAt
 	w.mu.RUnlock()
 
 	// Skip if no webhook configured
@@ -237,6 +240,12 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 
 	// Ignore messages from newsletters/channels
 	if msg.Info.Chat.Server == "newsletter" {
+		return
+	}
+
+	// Ignore offline/historical messages: only process messages received after connection
+	// This prevents the webhook from receiving messages that were pending while the server was offline
+	if !connectedAt.IsZero() && msg.Info.Timestamp.Before(connectedAt) {
 		return
 	}
 
