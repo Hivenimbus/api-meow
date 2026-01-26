@@ -183,9 +183,7 @@ const tabs = [
   { id: 'auth', label: 'Autenticação' },
   { id: 'instances', label: 'Instâncias' },
   { id: 'connection', label: 'Conexão' },
-  { id: 'messages', label: 'Mensagens' },
-  { id: 'tags', label: 'Etiquetas' },
-  { id: 'webhooks', label: 'Webhooks' }
+  { id: 'messages', label: 'Mensagens' }
 ]
 </script>
 
