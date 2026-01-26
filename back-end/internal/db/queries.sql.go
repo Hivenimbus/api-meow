@@ -13,11 +13,11 @@ import (
 
 const createInstance = `-- name: CreateInstance :one
 INSERT INTO instances (
-    name, webhook_url, tag_id, ignore_groups, receive_messages
+    name, webhook_url, tag_id, ignore_groups, receive_messages, proxy_enabled, proxy_url
 ) VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4, $5, $6, $7
 )
-RETURNING id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at
+RETURNING id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, proxy_enabled, proxy_url, created_at, updated_at
 `
 
 type CreateInstanceParams struct {
@@ -26,6 +26,8 @@ type CreateInstanceParams struct {
 	TagID           pgtype.Text
 	IgnoreGroups    pgtype.Bool
 	ReceiveMessages pgtype.Bool
+	ProxyEnabled    pgtype.Bool
+	ProxyUrl        pgtype.Text
 }
 
 func (q *Queries) CreateInstance(ctx context.Context, arg CreateInstanceParams) (Instance, error) {
@@ -35,6 +37,8 @@ func (q *Queries) CreateInstance(ctx context.Context, arg CreateInstanceParams) 
 		arg.TagID,
 		arg.IgnoreGroups,
 		arg.ReceiveMessages,
+		arg.ProxyEnabled,
+		arg.ProxyUrl,
 	)
 	var i Instance
 	err := row.Scan(
@@ -46,6 +50,8 @@ func (q *Queries) CreateInstance(ctx context.Context, arg CreateInstanceParams) 
 		&i.IgnoreGroups,
 		&i.WebhookUrl,
 		&i.ReceiveMessages,
+		&i.ProxyEnabled,
+		&i.ProxyUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -109,7 +115,7 @@ func (q *Queries) DeleteTag(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getInstance = `-- name: GetInstance :one
-SELECT id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at FROM instances
+SELECT id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, proxy_enabled, proxy_url, created_at, updated_at FROM instances
 WHERE id = $1 LIMIT 1
 `
 
@@ -125,6 +131,8 @@ func (q *Queries) GetInstance(ctx context.Context, id pgtype.UUID) (Instance, er
 		&i.IgnoreGroups,
 		&i.WebhookUrl,
 		&i.ReceiveMessages,
+		&i.ProxyEnabled,
+		&i.ProxyUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -132,7 +140,7 @@ func (q *Queries) GetInstance(ctx context.Context, id pgtype.UUID) (Instance, er
 }
 
 const getInstanceByName = `-- name: GetInstanceByName :one
-SELECT id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at FROM instances
+SELECT id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, proxy_enabled, proxy_url, created_at, updated_at FROM instances
 WHERE name = $1 LIMIT 1
 `
 
@@ -148,6 +156,8 @@ func (q *Queries) GetInstanceByName(ctx context.Context, name string) (Instance,
 		&i.IgnoreGroups,
 		&i.WebhookUrl,
 		&i.ReceiveMessages,
+		&i.ProxyEnabled,
+		&i.ProxyUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -155,7 +165,7 @@ func (q *Queries) GetInstanceByName(ctx context.Context, name string) (Instance,
 }
 
 const getInstanceByPhoneNumber = `-- name: GetInstanceByPhoneNumber :one
-SELECT id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at FROM instances
+SELECT id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, proxy_enabled, proxy_url, created_at, updated_at FROM instances
 WHERE phone_number = $1 AND status = 'connected' LIMIT 1
 `
 
@@ -171,6 +181,8 @@ func (q *Queries) GetInstanceByPhoneNumber(ctx context.Context, phoneNumber pgty
 		&i.IgnoreGroups,
 		&i.WebhookUrl,
 		&i.ReceiveMessages,
+		&i.ProxyEnabled,
+		&i.ProxyUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -195,7 +207,7 @@ func (q *Queries) GetTag(ctx context.Context, id pgtype.UUID) (Tag, error) {
 }
 
 const listConnectedInstances = `-- name: ListConnectedInstances :many
-SELECT id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at FROM instances
+SELECT id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, proxy_enabled, proxy_url, created_at, updated_at FROM instances
 WHERE status = 'connected'
 `
 
@@ -217,6 +229,8 @@ func (q *Queries) ListConnectedInstances(ctx context.Context) ([]Instance, error
 			&i.IgnoreGroups,
 			&i.WebhookUrl,
 			&i.ReceiveMessages,
+			&i.ProxyEnabled,
+			&i.ProxyUrl,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -231,7 +245,7 @@ func (q *Queries) ListConnectedInstances(ctx context.Context) ([]Instance, error
 }
 
 const listInstances = `-- name: ListInstances :many
-SELECT id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at FROM instances
+SELECT id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, proxy_enabled, proxy_url, created_at, updated_at FROM instances
 ORDER BY created_at DESC
 `
 
@@ -253,6 +267,8 @@ func (q *Queries) ListInstances(ctx context.Context) ([]Instance, error) {
 			&i.IgnoreGroups,
 			&i.WebhookUrl,
 			&i.ReceiveMessages,
+			&i.ProxyEnabled,
+			&i.ProxyUrl,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -300,7 +316,7 @@ const updateInstanceSettings = `-- name: UpdateInstanceSettings :one
 UPDATE instances
 SET webhook_url = $2, ignore_groups = $3, receive_messages = $4, tag_id = $5, updated_at = NOW()
 WHERE id = $1
-RETURNING id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at
+RETURNING id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, proxy_enabled, proxy_url, created_at, updated_at
 `
 
 type UpdateInstanceSettingsParams struct {
@@ -329,6 +345,8 @@ func (q *Queries) UpdateInstanceSettings(ctx context.Context, arg UpdateInstance
 		&i.IgnoreGroups,
 		&i.WebhookUrl,
 		&i.ReceiveMessages,
+		&i.ProxyEnabled,
+		&i.ProxyUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -337,9 +355,9 @@ func (q *Queries) UpdateInstanceSettings(ctx context.Context, arg UpdateInstance
 
 const updateInstanceSettingsByName = `-- name: UpdateInstanceSettingsByName :one
 UPDATE instances
-SET webhook_url = $2, ignore_groups = $3, receive_messages = $4, tag_id = $5, updated_at = NOW()
+SET webhook_url = $2, ignore_groups = $3, receive_messages = $4, tag_id = $5, proxy_enabled = $6, proxy_url = $7, updated_at = NOW()
 WHERE name = $1
-RETURNING id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at
+RETURNING id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, proxy_enabled, proxy_url, created_at, updated_at
 `
 
 type UpdateInstanceSettingsByNameParams struct {
@@ -348,6 +366,8 @@ type UpdateInstanceSettingsByNameParams struct {
 	IgnoreGroups    pgtype.Bool
 	ReceiveMessages pgtype.Bool
 	TagID           pgtype.Text
+	ProxyEnabled    pgtype.Bool
+	ProxyUrl        pgtype.Text
 }
 
 func (q *Queries) UpdateInstanceSettingsByName(ctx context.Context, arg UpdateInstanceSettingsByNameParams) (Instance, error) {
@@ -357,6 +377,8 @@ func (q *Queries) UpdateInstanceSettingsByName(ctx context.Context, arg UpdateIn
 		arg.IgnoreGroups,
 		arg.ReceiveMessages,
 		arg.TagID,
+		arg.ProxyEnabled,
+		arg.ProxyUrl,
 	)
 	var i Instance
 	err := row.Scan(
@@ -368,6 +390,8 @@ func (q *Queries) UpdateInstanceSettingsByName(ctx context.Context, arg UpdateIn
 		&i.IgnoreGroups,
 		&i.WebhookUrl,
 		&i.ReceiveMessages,
+		&i.ProxyEnabled,
+		&i.ProxyUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -378,7 +402,7 @@ const updateInstanceStatus = `-- name: UpdateInstanceStatus :one
 UPDATE instances
 SET status = $2, phone_number = $3, updated_at = NOW()
 WHERE id = $1
-RETURNING id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at
+RETURNING id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, proxy_enabled, proxy_url, created_at, updated_at
 `
 
 type UpdateInstanceStatusParams struct {
@@ -399,6 +423,8 @@ func (q *Queries) UpdateInstanceStatus(ctx context.Context, arg UpdateInstanceSt
 		&i.IgnoreGroups,
 		&i.WebhookUrl,
 		&i.ReceiveMessages,
+		&i.ProxyEnabled,
+		&i.ProxyUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -409,7 +435,7 @@ const updateInstanceStatusByName = `-- name: UpdateInstanceStatusByName :one
 UPDATE instances
 SET status = $2, phone_number = $3, updated_at = NOW()
 WHERE name = $1
-RETURNING id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, created_at, updated_at
+RETURNING id, name, status, phone_number, tag_id, ignore_groups, webhook_url, receive_messages, proxy_enabled, proxy_url, created_at, updated_at
 `
 
 type UpdateInstanceStatusByNameParams struct {
@@ -430,6 +456,8 @@ func (q *Queries) UpdateInstanceStatusByName(ctx context.Context, arg UpdateInst
 		&i.IgnoreGroups,
 		&i.WebhookUrl,
 		&i.ReceiveMessages,
+		&i.ProxyEnabled,
+		&i.ProxyUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

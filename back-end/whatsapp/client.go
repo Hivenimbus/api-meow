@@ -430,6 +430,13 @@ func (w *WAClient) GetWebhookURL() string {
 	return w.webhookURL
 }
 
+// SetProxy sets the proxy URL for this client
+func (w *WAClient) SetProxy(url string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.client.SetProxyAddress(url)
+}
+
 // WaitForConnection waits for connection with timeout
 func (w *WAClient) WaitForConnection(timeout time.Duration) error {
 	select {

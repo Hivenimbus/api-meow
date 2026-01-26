@@ -14,6 +14,8 @@ CREATE TABLE instances (
     ignore_groups BOOLEAN DEFAULT TRUE,
     webhook_url TEXT,
     receive_messages BOOLEAN DEFAULT TRUE,
+    proxy_enabled BOOLEAN DEFAULT FALSE,
+    proxy_url TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT instances_name_key UNIQUE (name)

@@ -60,6 +60,7 @@ type InstanceInfo struct {
 	PhoneNumber  string
 	WebhookURL   string
 	IgnoreGroups bool
+	ProxyURL     string
 }
 
 // RestoreClients restores clients from database using instance info from the app database
@@ -104,6 +105,11 @@ func (m *InstanceManager) RestoreClients(instances []InstanceInfo) {
 		// Configure settings
 		if instanceInfo.WebhookURL != "" {
 			client.SetWebhook(instanceInfo.WebhookURL)
+		}
+		if instanceInfo.ProxyURL != "" {
+			if err := client.SetProxy(instanceInfo.ProxyURL); err != nil {
+				m.log.Errorf("Failed to set proxy for instance %s: %v", instanceInfo.Name, err)
+			}
 		}
 		client.SetIgnoreGroups(instanceInfo.IgnoreGroups)
 

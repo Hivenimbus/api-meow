@@ -23,6 +23,8 @@ export interface ApiInstance {
     ignoreGroups: boolean
     webhookUrl?: string
     receiveMessages: boolean
+    proxyEnabled: boolean
+    proxyUrl?: string
     createdAt: string
     updatedAt: string
 }
@@ -83,6 +85,8 @@ export const useApi = () => {
             ignoreGroups: boolean
             receiveMessages: boolean
             tagId?: string
+            proxyEnabled: boolean
+            proxyUrl?: string
         }
     ): Promise<ApiInstance> => {
         const response = await fetch(`${API_BASE_URL}/instances/${name}/settings`, {
@@ -150,7 +154,10 @@ export const useApi = () => {
             method: 'POST',
             headers: headers()
         })
-        if (!response.ok) throw new Error('Failed to initiate connection')
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}))
+            throw new Error(errorData.error || 'Failed to initiate connection')
+        }
         return response.json()
     }
 

@@ -83,6 +83,9 @@ func main() {
 					if inst.IgnoreGroups.Valid {
 						info.IgnoreGroups = inst.IgnoreGroups.Bool
 					}
+					if inst.ProxyEnabled.Bool && inst.ProxyUrl.Valid {
+						info.ProxyURL = inst.ProxyUrl.String
+					}
 					instanceInfos = append(instanceInfos, info)
 				}
 			}
@@ -161,6 +164,8 @@ func main() {
 			TagId           *string `json:"tagId"`
 			IgnoreGroups    *bool   `json:"ignoreGroups"`
 			ReceiveMessages *bool   `json:"receiveMessages"`
+			ProxyEnabled    *bool   `json:"proxyEnabled"`
+			ProxyUrl        *string `json:"proxyUrl"`
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
@@ -178,6 +183,10 @@ func main() {
 		if body.ReceiveMessages != nil {
 			receiveMessages = *body.ReceiveMessages
 		}
+		proxyEnabled := false
+		if body.ProxyEnabled != nil {
+			proxyEnabled = *body.ProxyEnabled
+		}
 
 		instance, err := queries.CreateInstance(c.Context(), db.CreateInstanceParams{
 			Name:            body.Name,
@@ -185,6 +194,8 @@ func main() {
 			TagID:           textFromPtr(body.TagId),
 			IgnoreGroups:    pgtype.Bool{Bool: ignoreGroups, Valid: true},
 			ReceiveMessages: pgtype.Bool{Bool: receiveMessages, Valid: true},
+			ProxyEnabled:    pgtype.Bool{Bool: proxyEnabled, Valid: true},
+			ProxyUrl:        textFromPtr(body.ProxyUrl),
 		})
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
@@ -231,6 +242,8 @@ func main() {
 			IgnoreGroups    bool    `json:"ignoreGroups"`
 			ReceiveMessages bool    `json:"receiveMessages"`
 			TagId           *string `json:"tagId"`
+			ProxyEnabled    bool    `json:"proxyEnabled"`
+			ProxyUrl        *string `json:"proxyUrl"`
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
@@ -242,6 +255,8 @@ func main() {
 			IgnoreGroups:    pgtype.Bool{Bool: body.IgnoreGroups, Valid: true},
 			ReceiveMessages: pgtype.Bool{Bool: body.ReceiveMessages, Valid: true},
 			TagID:           textFromPtr(body.TagId),
+			ProxyEnabled:    pgtype.Bool{Bool: body.ProxyEnabled, Valid: true},
+			ProxyUrl:        textFromPtr(body.ProxyUrl),
 		})
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
@@ -278,21 +293,35 @@ func main() {
 			return c.Status(404).JSON(fiber.Map{"error": "Instance not found"})
 		}
 
-		// Start connection (will generate QR code if needed)
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-
-		client, err := waManager.Connect(ctx, name)
+		// Get client instance (creates it if needed)
+		client, err := waManager.GetClient(name)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		// Configure webhook and settings
+		// Configure settings BEFORE connecting
 		if instance.WebhookUrl.Valid {
 			client.SetWebhook(instance.WebhookUrl.String)
 		}
 		if instance.IgnoreGroups.Valid {
 			client.SetIgnoreGroups(instance.IgnoreGroups.Bool)
+		}
+		if instance.ProxyEnabled.Bool && instance.ProxyUrl.Valid {
+			if err := client.SetProxy(instance.ProxyUrl.String); err != nil {
+				log.Printf("Failed to set proxy for instance %s: %v", name, err)
+				return c.Status(400).JSON(fiber.Map{"error": "Invalid proxy URL"})
+			}
+		} else {
+			// Ensure proxy is cleared if disabled/empty
+			_ = client.SetProxy("")
+		}
+
+		// Start connection (will generate QR code if needed)
+		// We use a background context for the connection to ensure it persists
+		ctx := context.Background()
+		err = client.Connect(ctx)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// Update instance status to connecting
@@ -945,6 +974,8 @@ type InstanceResponse struct {
 	IgnoreGroups    bool   `json:"ignoreGroups"`
 	WebhookUrl      string `json:"webhookUrl,omitempty"`
 	ReceiveMessages bool   `json:"receiveMessages"`
+	ProxyEnabled    bool   `json:"proxyEnabled"`
+	ProxyUrl        string `json:"proxyUrl,omitempty"`
 	CreatedAt       string `json:"createdAt"`
 	UpdatedAt       string `json:"updatedAt"`
 }
@@ -959,6 +990,8 @@ func formatInstance(i db.Instance) InstanceResponse {
 		IgnoreGroups:    i.IgnoreGroups.Bool,
 		WebhookUrl:      i.WebhookUrl.String,
 		ReceiveMessages: i.ReceiveMessages.Bool,
+		ProxyEnabled:    i.ProxyEnabled.Bool,
+		ProxyUrl:        i.ProxyUrl.String,
 		CreatedAt:       i.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:       i.UpdatedAt.Time.Format("2006-01-02T15:04:05Z"),
 	}

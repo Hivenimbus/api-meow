@@ -1,8 +1,8 @@
 -- name: CreateInstance :one
 INSERT INTO instances (
-    name, webhook_url, tag_id, ignore_groups, receive_messages
+    name, webhook_url, tag_id, ignore_groups, receive_messages, proxy_enabled, proxy_url
 ) VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4, $5, $6, $7
 )
 RETURNING *;
 
@@ -38,7 +38,7 @@ RETURNING *;
 
 -- name: UpdateInstanceSettingsByName :one
 UPDATE instances
-SET webhook_url = $2, ignore_groups = $3, receive_messages = $4, tag_id = $5, updated_at = NOW()
+SET webhook_url = $2, ignore_groups = $3, receive_messages = $4, tag_id = $5, proxy_enabled = $6, proxy_url = $7, updated_at = NOW()
 WHERE name = $1
 RETURNING *;
 

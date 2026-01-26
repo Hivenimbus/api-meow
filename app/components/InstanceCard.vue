@@ -107,6 +107,8 @@ export interface InstanceSettings {
   webhookEvents: {
     receiveMessages: boolean
   }
+  proxyEnabled: boolean
+  proxyUrl: string
 }
 
 export interface Instance {

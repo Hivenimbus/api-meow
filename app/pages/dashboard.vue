@@ -339,6 +339,34 @@
           />
         </div>
 
+        <!-- Proxy Settings -->
+        <div class="space-y-4 pt-4 border-t border-slate-700/50">
+          <div class="flex items-center justify-between">
+            <div>
+              <h4 class="text-white font-medium">Usar Proxy</h4>
+              <p class="text-slate-400 text-sm">Conectar através de um proxy</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input 
+                type="checkbox" 
+                v-model="editSettings.proxyEnabled" 
+                class="sr-only peer"
+              />
+              <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+            </label>
+          </div>
+
+          <div v-if="editSettings.proxyEnabled" class="transition-all duration-300 ease-in-out">
+            <label class="block text-sm font-medium text-slate-300 mb-2">URL do Proxy</label>
+            <input
+              v-model="editSettings.proxyUrl"
+              type="text"
+              placeholder="http://user:pass@proxy.com:8080"
+              class="w-full px-4 py-3 bg-slate-900/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+            />
+          </div>
+        </div>
+
         <!-- Webhook Events -->
         <div>
           <label class="block text-sm font-medium text-slate-300 mb-3">Eventos do Webhook</label>
@@ -426,7 +454,9 @@ const editSettings = ref({
   ignoreGroups: true,
   webhookUrl: '',
   receiveMessages: true,
-  tagId: ''
+  tagId: '',
+  proxyEnabled: false,
+  proxyUrl: ''
 })
 
 // Instances from API
@@ -452,7 +482,9 @@ const fetchInstances = async () => {
         webhookUrl: i.webhookUrl || '',
         webhookEvents: {
           receiveMessages: i.receiveMessages
-        }
+        },
+        proxyEnabled: i.proxyEnabled,
+        proxyUrl: i.proxyUrl || ''
       }
     }))
   } catch (e) {
@@ -512,7 +544,9 @@ const handleAddInstance = async () => {
         webhookUrl: created.webhookUrl || '',
         webhookEvents: {
           receiveMessages: created.receiveMessages
-        }
+        },
+        proxyEnabled: created.proxyEnabled,
+        proxyUrl: created.proxyUrl || ''
       }
     })
     
@@ -566,7 +600,9 @@ const openSettingsModal = (instance: Instance) => {
     ignoreGroups: instance.settings?.ignoreGroups ?? true,
     webhookUrl: instance.settings?.webhookUrl || '',
     receiveMessages: instance.settings?.webhookEvents?.receiveMessages ?? true,
-    tagId: instance.tagId || ''
+    tagId: instance.tagId || '',
+    proxyEnabled: instance.settings?.proxyEnabled ?? false,
+    proxyUrl: instance.settings?.proxyUrl || ''
   }
   showSettingsModal.value = true
 }
@@ -580,7 +616,9 @@ const saveSettings = async () => {
       webhookUrl: editSettings.value.webhookUrl || undefined,
       ignoreGroups: editSettings.value.ignoreGroups,
       receiveMessages: editSettings.value.receiveMessages,
-      tagId: editSettings.value.tagId || undefined
+      tagId: editSettings.value.tagId || undefined,
+      proxyEnabled: editSettings.value.proxyEnabled,
+      proxyUrl: editSettings.value.proxyUrl || undefined
     })
     
     // Update local instance
@@ -592,7 +630,9 @@ const saveSettings = async () => {
         webhookUrl: updated.webhookUrl || '',
         webhookEvents: {
           receiveMessages: updated.receiveMessages
-        }
+        },
+        proxyEnabled: updated.proxyEnabled,
+        proxyUrl: updated.proxyUrl || ''
       }
     }
     
@@ -631,8 +671,13 @@ const initiateConnection = async () => {
     // Start polling for status/QR updates
     startPolling(instanceToConnect.value.name)
     
-  } catch (e) {
-    error('Erro ao iniciar conexão')
+  } catch (e: any) {
+    const msg = e.message || ''
+    if (msg.includes('Invalid proxy URL') || msg.includes('failed to dial') || msg.includes('Bad Request')) {
+      error('Falha na conexão: Verifique se a URL do Proxy está correta e funcionando')
+    } else {
+      error('Erro ao iniciar conexão: ' + msg)
+    }
     console.error(e)
     showConnectModal.value = false
   } finally {

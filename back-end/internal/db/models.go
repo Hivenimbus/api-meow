@@ -17,6 +17,8 @@ type Instance struct {
 	IgnoreGroups    pgtype.Bool
 	WebhookUrl      pgtype.Text
 	ReceiveMessages pgtype.Bool
+	ProxyEnabled    pgtype.Bool
+	ProxyUrl        pgtype.Text
 	CreatedAt       pgtype.Timestamp
 	UpdatedAt       pgtype.Timestamp
 }
@@ -26,92 +28,4 @@ type Tag struct {
 	Name      string
 	Color     string
 	CreatedAt pgtype.Timestamp
-}
-
-type WhatsmeowAppStateSyncKey struct {
-	OurJid      string
-	KeyID       []byte
-	KeyData     []byte
-	Timestamp   int64
-	Fingerprint []byte
-}
-
-type WhatsmeowAppStateVersion struct {
-	OurJid  string
-	Name    string
-	Version int64
-	Hash    []byte
-}
-
-type WhatsmeowChatSetting struct {
-	OurJid     string
-	ChatJid    string
-	MutedUntil int64
-	Pinned     bool
-	Archived   bool
-}
-
-type WhatsmeowContact struct {
-	OurJid       string
-	TheirJid     string
-	FirstName    string
-	FullName     string
-	PushName     string
-	BusinessName string
-	RowID        int64
-}
-
-type WhatsmeowDevice struct {
-	Jid              string
-	RegistrationID   int32
-	NoiseKey         []byte
-	IdentityKey      []byte
-	SignedPreKeyID   int32
-	SignedPreKey     []byte
-	SignedPreKeySig  []byte
-	AdvKeySecret     []byte
-	AdvKeyIndex      int32
-	AdvAccountSig    []byte
-	Platform         string
-	BusinessName     string
-	PushName         string
-	AdAccountID      string
-	VerifiedName     []byte
-	VerifiedNameCert []byte
-	VerifiedNameVer  []byte
-	PairProtoVersion int32
-}
-
-type WhatsmeowIdentityKey struct {
-	OurJid   string
-	TheirJid string
-	Content  []byte
-}
-
-type WhatsmeowLidLookup struct {
-	OurJid   string
-	TheirJid string
-	Lid      string
-	Server   string
-}
-
-type WhatsmeowPreKey struct {
-	OurJid     string
-	KeyID      int32
-	Content    []byte
-	UploadTime int64
-	Uploaded   bool
-}
-
-type WhatsmeowSenderKey struct {
-	OurJid   string
-	GroupID  string
-	SenderID string
-	Content  []byte
-}
-
-type WhatsmeowSession struct {
-	OurJid   string
-	TheirJid string
-	Content  []byte
 }
