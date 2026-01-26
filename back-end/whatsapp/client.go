@@ -299,6 +299,10 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 		if message.ImageMessage.Mimetype != nil {
 			msgData.MimeType = *message.ImageMessage.Mimetype
 		}
+		// Download and encode image as base64
+		if data, err := w.client.Download(context.Background(), message.ImageMessage); err == nil {
+			msgData.MediaBase64 = base64.StdEncoding.EncodeToString(data)
+		}
 	} else if message.VideoMessage != nil {
 		msgData.MessageType = "video"
 		if message.VideoMessage.Caption != nil {
@@ -307,10 +311,18 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 		if message.VideoMessage.Mimetype != nil {
 			msgData.MimeType = *message.VideoMessage.Mimetype
 		}
+		// Download and encode video as base64
+		if data, err := w.client.Download(context.Background(), message.VideoMessage); err == nil {
+			msgData.MediaBase64 = base64.StdEncoding.EncodeToString(data)
+		}
 	} else if message.AudioMessage != nil {
 		msgData.MessageType = "audio"
 		if message.AudioMessage.Mimetype != nil {
 			msgData.MimeType = *message.AudioMessage.Mimetype
+		}
+		// Download and encode audio as base64
+		if data, err := w.client.Download(context.Background(), message.AudioMessage); err == nil {
+			msgData.MediaBase64 = base64.StdEncoding.EncodeToString(data)
 		}
 	} else if message.DocumentMessage != nil {
 		msgData.MessageType = "document"
@@ -320,10 +332,21 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 		if message.DocumentMessage.Mimetype != nil {
 			msgData.MimeType = *message.DocumentMessage.Mimetype
 		}
+		if message.DocumentMessage.FileName != nil {
+			msgData.FileName = *message.DocumentMessage.FileName
+		}
+		// Download and encode document as base64
+		if data, err := w.client.Download(context.Background(), message.DocumentMessage); err == nil {
+			msgData.MediaBase64 = base64.StdEncoding.EncodeToString(data)
+		}
 	} else if message.StickerMessage != nil {
 		msgData.MessageType = "sticker"
 		if message.StickerMessage.Mimetype != nil {
 			msgData.MimeType = *message.StickerMessage.Mimetype
+		}
+		// Download and encode sticker as base64
+		if data, err := w.client.Download(context.Background(), message.StickerMessage); err == nil {
+			msgData.MediaBase64 = base64.StdEncoding.EncodeToString(data)
 		}
 	} else if message.ContactMessage != nil {
 		msgData.MessageType = "contact"

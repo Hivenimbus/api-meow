@@ -28,6 +28,8 @@ type MessageData struct {
 	Text        string `json:"text,omitempty"`
 	Caption     string `json:"caption,omitempty"`
 	MediaURL    string `json:"mediaUrl,omitempty"`
+	MediaBase64 string `json:"mediaBase64,omitempty"`
+	FileName    string `json:"fileName,omitempty"`
 	MimeType    string `json:"mimeType,omitempty"`
 	IsGroup     bool   `json:"isGroup"`
 	GroupID     string `json:"groupId,omitempty"`
