@@ -885,8 +885,8 @@ func main() {
 		return c.SendStatus(204)
 	})
 
-	log.Println("Server starting on port 8080...")
-	log.Fatal(app.Listen(":8080"))
+	log.Println("Server starting on port 80...")
+	log.Fatal(app.Listen(":80"))
 }
 
 // Auth middleware
