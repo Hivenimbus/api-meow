@@ -5,7 +5,22 @@ export default defineNuxtConfig({
   modules: ['@nuxtjs/tailwindcss'],
   runtimeConfig: {
     public: {
-      backendUrl: process.env.BACKEND_URL || 'http://localhost:8080'
+      // Use empty string to call same origin (via proxy) - works in both dev and prod
+      backendUrl: ''
+    }
+  },
+  nitro: {
+    // Proxy all /api/* requests to the Go backend
+    routeRules: {
+      '/api/**': {
+        proxy: 'http://localhost:8080/api/**'
+      },
+      '/instances/**': {
+        proxy: 'http://localhost:8080/instances/**'
+      },
+      '/tags/**': {
+        proxy: 'http://localhost:8080/tags/**'
+      }
     }
   }
 })

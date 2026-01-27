@@ -2,7 +2,8 @@ import { useAuth } from './useAuth'
 
 const getBackendUrl = () => {
     const config = useRuntimeConfig()
-    return config.public.backendUrl || 'http://localhost:8080'
+    // Returns empty string to use same origin (via Nitro proxy)
+    return config.public.backendUrl || ''
 }
 
 const headers = () => {
