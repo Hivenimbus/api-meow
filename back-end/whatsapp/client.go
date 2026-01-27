@@ -53,8 +53,24 @@ func NewWAClient(instanceID string, client *whatsmeow.Client) *WAClient {
 // Connect initiates the connection to WhatsApp
 func (w *WAClient) Connect(ctx context.Context) error {
 	w.mu.Lock()
+	// If already connecting, return error to prevent duplicate QR channels
+	if w.status == "connecting" {
+		w.mu.Unlock()
+		return fmt.Errorf("connection already in progress")
+	}
+	// If already connected, return success
+	if w.status == "connected" && w.client.IsConnected() {
+		w.mu.Unlock()
+		return nil
+	}
+
+	// Clear stale QR code
+	w.qrCode = ""
 	w.status = "connecting"
 	w.mu.Unlock()
+
+	// Reset channels for fresh connection
+	w.resetChannels()
 
 	// Check if already logged in
 	if w.client.Store.ID != nil {
@@ -388,6 +404,39 @@ func (w *WAClient) Logout(ctx context.Context) error {
 	w.qrCode = ""
 	w.mu.Unlock()
 	return nil
+}
+
+// resetChannels resets the event channels for a fresh connection attempt
+func (w *WAClient) resetChannels() {
+	// Drain existing channels (non-blocking)
+	for {
+		select {
+		case <-w.QRCodeChan:
+		default:
+			goto drainConnected
+		}
+	}
+drainConnected:
+	for {
+		select {
+		case <-w.ConnectedChan:
+		default:
+			goto drainError
+		}
+	}
+drainError:
+	for {
+		select {
+		case <-w.ErrorChan:
+		default:
+			goto donedraining
+		}
+	}
+donedraining:
+	// Recreate channels with fresh buffers
+	w.QRCodeChan = make(chan string, 10)
+	w.ConnectedChan = make(chan bool, 1)
+	w.ErrorChan = make(chan error, 10)
 }
 
 // GetQRCode returns the current QR code as base64

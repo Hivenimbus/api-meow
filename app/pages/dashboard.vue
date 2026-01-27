@@ -705,11 +705,19 @@ const startPolling = (instanceName: string) => {
           return
         } else if (statusData.status === 'disconnected') {
            instance.status = 'disconnected'
+           // If we had a QR code and now status is disconnected, it means timeout
+           if (qrCode.value) {
+             error('QR Code expirado. Clique em "Gerar QR Code" para tentar novamente.')
+             qrCode.value = ''
+             saving.value = false
+             stopPolling()
+             return
+           }
         }
       }
       
       // If still connecting, try to get QR code if we don't have it or it expired
-      if (statusData.status === 'connecting' || statusData.status === 'disconnected') {
+      if (statusData.status === 'connecting') {
          try {
             const qrData = await api.getQRCode(instanceName)
             if (qrData.qrCode) {

@@ -241,11 +241,12 @@ func (m *InstanceManager) Connect(ctx context.Context, instanceID string) (*WACl
 	return client, nil
 }
 
-// Disconnect disconnects an instance
+// Disconnect disconnects an instance and removes it from memory
 func (m *InstanceManager) Disconnect(instanceID string) error {
-	m.mu.RLock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	client, exists := m.clients[instanceID]
-	m.mu.RUnlock()
 
 	if !exists {
 		// If client doesn't exist in memory, consider it already disconnected
@@ -253,6 +254,9 @@ func (m *InstanceManager) Disconnect(instanceID string) error {
 	}
 
 	client.Disconnect()
+
+	// Remove client from memory to ensure clean state on reconnection
+	delete(m.clients, instanceID)
 	return nil
 }
 
