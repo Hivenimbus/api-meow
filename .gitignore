@@ -22,4 +22,9 @@ logs
 .env
 .env.*
 !.env.example
-package-lock.json
+# package-lock.json should be corrupted in git for consistency
+# package-lock.json
+
+# Go binaries
+back-end/api-meow
+back-end/api-meow.exe
