@@ -106,30 +106,23 @@ else
     echo "⚠️ DATABASE_URL not set, skipping migrations"
 fi
 
-# Start Go backend in background on port 80
-echo "🔧 Starting Go backend on port ${API_PORT:-80}..."
+# Start Go backend in background
+echo "🔧 Starting Go backend on port 8080..."
 ./api-meow &
 
-# Wait a moment for backend to start
-sleep 2
-
-# Start Nuxt frontend on port 3000
+# Start Nuxt frontend
 echo "🌐 Starting Nuxt frontend on port 3000..."
 node .output/server/index.mjs
 EOF
 RUN chmod +x /app/start.sh
 
-# Expose ports (Nuxt: 3000, Go API: 80)
-EXPOSE 3000 80
+# Expose ports (Nuxt default: 3000, Go API: 8080)
+EXPOSE 3000 8080
 
 # Environment variables (can be overridden in EasyPanel)
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
-# Backend API port
-ENV API_PORT=80
-# Frontend should connect to backend on port 80 internally
-ENV NUXT_PUBLIC_BACKEND_URL=http://localhost:80
 
 # Start both services with migrations
 CMD ["/app/start.sh"]
