@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+.nuxt/
+.output/
+dist/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Environment files (set via EasyPanel)
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test files
+*.test.*
+__tests__/
+
+# Compiled Go binary (use fresh build)
+back-end/*.exe
+back-end/api-meow
+
+# Misc
+README.md
+LICENSE
+*.md
