@@ -57,7 +57,24 @@
             path="/api/instances" 
             title="Listar Instâncias" 
             description="Retorna todas as instâncias cadastradas." 
-          />
+          >
+            <template #response>
+[
+  {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Minha Instância",
+    "status": "connected",
+    "phoneNumber": "5511999999999",
+    "webhookUrl": "https://api.site.com/webhook",
+    "ignoreGroups": true,
+    "receiveMessages": true,
+    "proxyEnabled": false,
+    "createdAt": "2024-01-15T10:30:00Z",
+    "updatedAt": "2024-01-15T10:30:00Z"
+  }
+]
+            </template>
+          </EndpointCard>
           
           <EndpointCard 
             method="POST" 
@@ -73,6 +90,20 @@
   "proxyUrl": "http://user:pass@proxy.com:8080"
 }
             </template>
+            <template #response>
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "Minha Instância",
+  "status": "disconnected",
+  "webhookUrl": "https://api.site.com/webhook",
+  "ignoreGroups": true,
+  "receiveMessages": true,
+  "proxyEnabled": true,
+  "proxyUrl": "http://user:pass@proxy.com:8080",
+  "createdAt": "2024-01-15T10:30:00Z",
+  "updatedAt": "2024-01-15T10:30:00Z"
+}
+            </template>
           </EndpointCard>
 
           <EndpointCard 
@@ -84,8 +115,25 @@
              <template #body>
 {
   "webhookUrl": "https://new-url.com",
+  "ignoreGroups": true,
+  "receiveMessages": true,
   "proxyEnabled": true,
   "proxyUrl": "http://proxy.com:8080"
+}
+            </template>
+            <template #response>
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "Minha Instância",
+  "status": "connected",
+  "phoneNumber": "5511999999999",
+  "webhookUrl": "https://new-url.com",
+  "ignoreGroups": true,
+  "receiveMessages": true,
+  "proxyEnabled": true,
+  "proxyUrl": "http://proxy.com:8080",
+  "createdAt": "2024-01-15T10:30:00Z",
+  "updatedAt": "2024-01-15T12:45:00Z"
 }
             </template>
           </EndpointCard>
@@ -98,14 +146,43 @@
             path="/api/instances/:name/connect" 
             title="Conectar Instância" 
             description="Inicia a conexão e gera o QR Code se necessário." 
-          />
+          >
+            <template #response>
+{
+  "status": "connecting",
+  "qrCode": "data:image/png;base64,iVBORw0KGgo...",
+  "phone": "",
+  "message": "Connection initiated"
+}
+            </template>
+          </EndpointCard>
           
           <EndpointCard 
             method="GET" 
             path="/api/instances/:name/wa-status" 
             title="Status da Conexão" 
             description="Verifica se o WhatsApp está conectado." 
-          />
+          >
+            <template #response>
+{
+  "status": "connected",
+  "phone": "5511999999999"
+}
+            </template>
+          </EndpointCard>
+
+          <EndpointCard 
+            method="POST" 
+            path="/api/instances/:name/disconnect" 
+            title="Desconectar Instância" 
+            description="Desconecta a sessão ativa do WhatsApp." 
+          >
+            <template #response>
+{
+  "message": "Disconnected successfully"
+}
+            </template>
+          </EndpointCard>
         </section>
 
         <!-- Messages Section -->
@@ -120,7 +197,14 @@
 {
   "to": "5511999999999",
   "text": "Olá mundo!",
-  "simulateTyping": true
+  "simulateTyping": true,
+  "typingDuration": 2000
+}
+            </template>
+            <template #response>
+{
+  "messageId": "3EB0C767D097B7C09D70",
+  "timestamp": "2024-01-15T14:30:00Z"
 }
             </template>
           </EndpointCard>
@@ -137,6 +221,68 @@
   "mediaType": "image",
   "url": "https://exemplo.com/foto.jpg",
   "caption": "Veja esta foto"
+}
+            </template>
+            <template #response>
+{
+  "messageId": "3EB0C767D097B7C09D71",
+  "timestamp": "2024-01-15T14:31:00Z"
+}
+            </template>
+          </EndpointCard>
+
+          <EndpointCard 
+            method="POST" 
+            path="/api/instances/:name/send-message-batch" 
+            title="Enviar Texto em Lote" 
+            description="Envia várias mensagens de texto em paralelo." 
+          >
+            <template #body>
+{
+  "messages": [
+    { "to": "5511999999999", "text": "Msg 1" },
+    { "to": "5511888888888", "text": "Msg 2" }
+  ],
+  "maxWorkers": 5
+}
+            </template>
+            <template #response>
+{
+  "total": 2,
+  "success": 2,
+  "failed": 0,
+  "results": [
+    { "index": 0, "to": "5511999999999", "messageId": "3EB...", "success": true },
+    { "index": 1, "to": "5511888888888", "messageId": "3EB...", "success": true }
+  ]
+}
+            </template>
+          </EndpointCard>
+
+          <EndpointCard 
+            method="POST" 
+            path="/api/instances/:name/send-media-batch" 
+            title="Enviar Mídia em Lote" 
+            description="Envia várias mídias em paralelo." 
+          >
+            <template #body>
+{
+  "messages": [
+    { "to": "5511999999999", "mediaType": "image", "url": "https://ex.com/1.jpg" },
+    { "to": "5511888888888", "mediaType": "document", "url": "https://ex.com/doc.pdf", "fileName": "doc.pdf" }
+  ],
+  "maxWorkers": 5
+}
+            </template>
+            <template #response>
+{
+  "total": 2,
+  "success": 2,
+  "failed": 0,
+  "results": [
+    { "index": 0, "to": "5511999999999", "messageId": "3EB...", "success": true },
+    { "index": 1, "to": "5511888888888", "messageId": "3EB...", "success": true }
+  ]
 }
             </template>
           </EndpointCard>

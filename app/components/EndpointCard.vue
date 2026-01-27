@@ -26,6 +26,13 @@
           <pre><slot name="body" /></pre>
         </div>
       </div>
+
+      <div v-if="$slots.response" class="mt-4">
+        <div class="text-xs text-emerald-500/80 uppercase tracking-wider font-semibold mb-2">Response Example</div>
+        <div class="bg-slate-950 rounded-xl border border-emerald-500/20 p-4 font-mono text-xs text-emerald-400/90 overflow-x-auto">
+          <pre><slot name="response" /></pre>
+        </div>
+      </div>
     </div>
   </div>
 </template>
