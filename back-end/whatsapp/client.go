@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"strings"
+
 	"github.com/skip2/go-qrcode"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -520,6 +522,40 @@ type ContactInfo struct {
 	BusinessName string `json:"businessName"`
 }
 
+// parseRecipientJID correctly parses a recipient string into a JID
+func (w *WAClient) parseRecipientJID(recipient string) (types.JID, error) {
+	if recipient == "" {
+		return types.EmptyJID, fmt.Errorf("recipient is empty")
+	}
+
+	// If it's already a full JID, parse it directly
+	if strings.Contains(recipient, "@") {
+		return types.ParseJID(recipient)
+	}
+
+	// Otherwise, assume it's a phone number and add the server
+	return types.NewJID(recipient, types.DefaultUserServer), nil
+}
+
+// validateNumber checks if a JID is a valid WhatsApp account
+func (w *WAClient) validateNumber(ctx context.Context, jid types.JID) error {
+	// Only validate user JIDs (not groups or newsletters)
+	if jid.Server != types.DefaultUserServer {
+		return nil
+	}
+
+	resp, err := w.client.IsOnWhatsApp(ctx, []string{jid.User})
+	if err != nil {
+		return fmt.Errorf("failed to check if number is on WhatsApp: %w", err)
+	}
+
+	if len(resp) == 0 || !resp[0].IsIn {
+		return fmt.Errorf("number is not on WhatsApp")
+	}
+
+	return nil
+}
+
 // SendTextMessage sends a text message with optional typing indicator
 func (w *WAClient) SendTextMessage(ctx context.Context, recipient string, text string, simulateTyping bool, typingDurationMs int) (*SendResponse, error) {
 	if !w.client.IsConnected() {
@@ -527,9 +563,14 @@ func (w *WAClient) SendTextMessage(ctx context.Context, recipient string, text s
 	}
 
 	// Parse recipient JID
-	recipientJID, err := types.ParseJID(recipient + "@s.whatsapp.net")
+	recipientJID, err := w.parseRecipientJID(recipient)
 	if err != nil {
 		return nil, fmt.Errorf("invalid recipient: %w", err)
+	}
+
+	// Validate number
+	if err := w.validateNumber(ctx, recipientJID); err != nil {
+		return nil, err
 	}
 
 	// Simulate typing if requested
@@ -576,9 +617,14 @@ func (w *WAClient) SendImageMessage(ctx context.Context, recipient string, image
 	}
 
 	// Parse recipient JID
-	recipientJID, err := types.ParseJID(recipient + "@s.whatsapp.net")
+	recipientJID, err := w.parseRecipientJID(recipient)
 	if err != nil {
 		return nil, fmt.Errorf("invalid recipient: %w", err)
+	}
+
+	// Validate number
+	if err := w.validateNumber(ctx, recipientJID); err != nil {
+		return nil, err
 	}
 
 	// Upload image
@@ -619,9 +665,14 @@ func (w *WAClient) SendVideoMessage(ctx context.Context, recipient string, video
 	}
 
 	// Parse recipient JID
-	recipientJID, err := types.ParseJID(recipient + "@s.whatsapp.net")
+	recipientJID, err := w.parseRecipientJID(recipient)
 	if err != nil {
 		return nil, fmt.Errorf("invalid recipient: %w", err)
+	}
+
+	// Validate number
+	if err := w.validateNumber(ctx, recipientJID); err != nil {
+		return nil, err
 	}
 
 	// Upload video
@@ -662,9 +713,14 @@ func (w *WAClient) SendAudioMessage(ctx context.Context, recipient string, audio
 	}
 
 	// Parse recipient JID
-	recipientJID, err := types.ParseJID(recipient + "@s.whatsapp.net")
+	recipientJID, err := w.parseRecipientJID(recipient)
 	if err != nil {
 		return nil, fmt.Errorf("invalid recipient: %w", err)
+	}
+
+	// Validate number
+	if err := w.validateNumber(ctx, recipientJID); err != nil {
+		return nil, err
 	}
 
 	// Simulate recording if requested
@@ -725,9 +781,14 @@ func (w *WAClient) SendDocumentMessage(ctx context.Context, recipient string, do
 	}
 
 	// Parse recipient JID
-	recipientJID, err := types.ParseJID(recipient + "@s.whatsapp.net")
+	recipientJID, err := w.parseRecipientJID(recipient)
 	if err != nil {
 		return nil, fmt.Errorf("invalid recipient: %w", err)
+	}
+
+	// Validate number
+	if err := w.validateNumber(ctx, recipientJID); err != nil {
+		return nil, err
 	}
 
 	// Upload document
