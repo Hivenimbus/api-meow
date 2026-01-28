@@ -434,7 +434,11 @@ func main() {
 
 		resp, err := waManager.SendTextMessage(name, body.To, body.Text, body.SimulateTyping, body.TypingDuration)
 		if err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+			status := 500
+			if strings.Contains(err.Error(), "WhatsApp") || strings.Contains(err.Error(), "recipient") || strings.Contains(err.Error(), "connected") {
+				status = 400
+			}
+			return c.Status(status).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		return c.JSON(fiber.Map{
@@ -617,7 +621,11 @@ func main() {
 		}
 
 		if err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+			status := 500
+			if strings.Contains(err.Error(), "WhatsApp") || strings.Contains(err.Error(), "recipient") || strings.Contains(err.Error(), "connected") {
+				status = 400
+			}
+			return c.Status(status).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		return c.JSON(fiber.Map{
