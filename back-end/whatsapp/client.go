@@ -55,28 +55,27 @@ func NewWAClient(instanceID string, client *whatsmeow.Client) *WAClient {
 // Connect initiates the connection to WhatsApp
 func (w *WAClient) Connect(ctx context.Context) error {
 	w.mu.Lock()
-	// If status is "connecting" but the underlying client is not actually connected,
-	// the QR code likely expired or the connection was abandoned. Reset and retry.
-	if w.status == "connecting" && !w.client.IsConnected() {
-		// Disconnect the stale client to clean up internal state
+
+	// If status is "connecting" (e.g., QR code displayed but not scanned),
+	// disconnect first to allow a fresh reconnection.
+	// NOTE: IsConnected() returns true even during QR scan (WebSocket is open),
+	// so we cannot rely on it to distinguish "waiting for QR" from "actually connecting".
+	// The safest approach is to always reset when asked to connect again.
+	if w.status == "connecting" {
 		w.mu.Unlock()
 		w.client.Disconnect()
 		w.mu.Lock()
 		w.status = "disconnected"
 		w.qrCode = ""
 	}
-	// If already connecting (and actually connected), prevent duplicate
-	if w.status == "connecting" {
-		w.mu.Unlock()
-		return fmt.Errorf("connection already in progress")
-	}
-	// If already connected, return success
+
+	// If already connected and healthy, return success
 	if w.status == "connected" && w.client.IsConnected() {
 		w.mu.Unlock()
 		return nil
 	}
 
-	// Clear stale QR code
+	// Clear stale QR code and mark as connecting
 	w.qrCode = ""
 	w.status = "connecting"
 	w.mu.Unlock()
