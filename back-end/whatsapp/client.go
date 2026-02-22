@@ -55,7 +55,17 @@ func NewWAClient(instanceID string, client *whatsmeow.Client) *WAClient {
 // Connect initiates the connection to WhatsApp
 func (w *WAClient) Connect(ctx context.Context) error {
 	w.mu.Lock()
-	// If already connecting, return error to prevent duplicate QR channels
+	// If status is "connecting" but the underlying client is not actually connected,
+	// the QR code likely expired or the connection was abandoned. Reset and retry.
+	if w.status == "connecting" && !w.client.IsConnected() {
+		// Disconnect the stale client to clean up internal state
+		w.mu.Unlock()
+		w.client.Disconnect()
+		w.mu.Lock()
+		w.status = "disconnected"
+		w.qrCode = ""
+	}
+	// If already connecting (and actually connected), prevent duplicate
 	if w.status == "connecting" {
 		w.mu.Unlock()
 		return fmt.Errorf("connection already in progress")
@@ -111,6 +121,14 @@ func (w *WAClient) handleQRCodes(ctx context.Context, qrChan <-chan whatsmeow.QR
 			return
 		case evt, ok := <-qrChan:
 			if !ok {
+				// Channel closed unexpectedly (e.g., client disconnected before timeout event)
+				// Reset status so a new connection attempt can be made
+				w.mu.Lock()
+				if w.status == "connecting" {
+					w.status = "disconnected"
+					w.qrCode = ""
+				}
+				w.mu.Unlock()
 				return
 			}
 
