@@ -267,12 +267,18 @@ func main() {
 	api.Delete("/instances/:name", func(c *fiber.Ctx) error {
 		name := c.Params("name")
 
+		// Verify instance exists
+		_, err := queries.GetInstanceByName(c.Context(), name)
+		if err != nil {
+			return c.Status(404).JSON(fiber.Map{"error": "Instance not found"})
+		}
+
 		// Disconnect and remove WhatsApp client if exists
 		if waManager != nil {
 			waManager.RemoveClient(name)
 		}
 
-		err := queries.DeleteInstanceByName(c.Context(), name)
+		err = queries.DeleteInstanceByName(c.Context(), name)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}

@@ -106,10 +106,10 @@
             </template>
           </EndpointCard>
 
-          <EndpointCard 
-            method="PUT" 
-            path="/api/instances/:name/settings" 
-            title="Atualizar Configurações" 
+          <EndpointCard
+            method="PUT"
+            path="/api/instances/:name/settings"
+            title="Atualizar Configurações"
             description="Atualiza configurações de webhook e proxy."
           >
              <template #body>
@@ -135,6 +135,20 @@
   "createdAt": "2024-01-15T10:30:00Z",
   "updatedAt": "2024-01-15T12:45:00Z"
 }
+            </template>
+          </EndpointCard>
+
+          <EndpointCard
+            method="DELETE"
+            path="/api/instances/:name"
+            title="Deletar Instância"
+            description="Remove permanentemente uma instância e desconecta a sessão WhatsApp ativa."
+          >
+            <template #response>
+// 204 No Content — sem corpo de resposta em caso de sucesso
+
+// 404 — Instância não encontrada
+{ "error": "Instance not found" }
             </template>
           </EndpointCard>
         </section>
