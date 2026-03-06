@@ -17,9 +17,9 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/recover"
-	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 var apiKey string
@@ -40,21 +40,21 @@ func main() {
 		log.Fatal("APIKEY is not set")
 	}
 
-	// Connect to database
-	pool, err := pgxpool.New(context.Background(), dbURL)
+	// Connect to database via GORM
+	gormDB, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("Unable to connect to database: %v", err)
 	}
-	defer pool.Close()
 
-	// Initialize queries
-	queries := db.New(pool)
+	// Create/update tables automatically
+	if err := gormDB.AutoMigrate(&db.Instance{}, &db.Tag{}); err != nil {
+		log.Fatalf("Failed to migrate database: %v", err)
+	}
 
 	// Initialize WhatsApp manager
 	waManager, err := whatsapp.NewInstanceManager(dbURL)
 	if err != nil {
 		log.Printf("Warning: Failed to initialize WhatsApp manager: %v", err)
-		// Continue without WhatsApp functionality
 		waManager = nil
 	} else {
 		defer waManager.Close()
@@ -62,38 +62,34 @@ func main() {
 
 		// Restore and auto-reconnect instances that were connected before restart
 		go func() {
-			// Get all connected instances from database
-			connectedInstances, err := queries.ListConnectedInstances(context.Background())
-			if err != nil {
+			var connectedInstances []db.Instance
+			if err := gormDB.Where("status = ?", "connected").Find(&connectedInstances).Error; err != nil {
 				log.Printf("Warning: Failed to get connected instances: %v", err)
 				return
 			}
 
-			// Build instance info list for restoration
 			var instanceInfos []whatsapp.InstanceInfo
 			for _, inst := range connectedInstances {
-				if inst.PhoneNumber.Valid && inst.PhoneNumber.String != "" {
+				if inst.PhoneNumber != nil && *inst.PhoneNumber != "" {
 					info := whatsapp.InstanceInfo{
 						Name:        inst.Name,
-						PhoneNumber: inst.PhoneNumber.String,
+						PhoneNumber: *inst.PhoneNumber,
 					}
-					if inst.WebhookUrl.Valid {
-						info.WebhookURL = inst.WebhookUrl.String
+					if inst.WebhookUrl != nil {
+						info.WebhookURL = *inst.WebhookUrl
 					}
-					if inst.IgnoreGroups.Valid {
-						info.IgnoreGroups = inst.IgnoreGroups.Bool
+					if inst.IgnoreGroups != nil {
+						info.IgnoreGroups = *inst.IgnoreGroups
 					}
-					if inst.ProxyEnabled.Bool && inst.ProxyUrl.Valid {
-						info.ProxyURL = inst.ProxyUrl.String
+					if inst.ProxyEnabled != nil && *inst.ProxyEnabled && inst.ProxyUrl != nil {
+						info.ProxyURL = *inst.ProxyUrl
 					}
 					instanceInfos = append(instanceInfos, info)
 				}
 			}
 
-			// Restore clients using correct name mapping
 			waManager.RestoreClients(instanceInfos)
 
-			// Auto-reconnect restored instances IN PARALLEL
 			var wg sync.WaitGroup
 			for _, inst := range instanceInfos {
 				wg.Add(1)
@@ -103,10 +99,8 @@ func main() {
 					_, err := waManager.Connect(context.Background(), instanceName)
 					if err != nil {
 						log.Printf("Failed to auto-reconnect instance %s: %v", instanceName, err)
-						// Update status in database
-						queries.UpdateInstanceStatusByName(context.Background(), db.UpdateInstanceStatusByNameParams{
-							Name:   instanceName,
-							Status: "disconnected",
+						gormDB.Model(&db.Instance{}).Where("name = ?", instanceName).Updates(map[string]interface{}{
+							"status": "disconnected",
 						})
 					} else {
 						log.Printf("Successfully auto-reconnected instance: %s", instanceName)
@@ -125,33 +119,28 @@ func main() {
 		},
 	})
 
-	// Recover Middleware
 	app.Use(recover.New())
 
-	// Request Logging (Simple)
 	app.Use(func(c *fiber.Ctx) error {
 		log.Printf("%s %s", c.Method(), c.Path())
 		return c.Next()
 	})
 
-	// CORS Middleware
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
 	}))
 
-	// Public route
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.SendString("API Meow - WhatsApp API Backend")
 	})
 
-	// API routes with auth middleware
 	api := app.Group("/api", authMiddleware)
 
 	// Instance routes
 	api.Get("/instances", func(c *fiber.Ctx) error {
-		instances, err := queries.ListInstances(c.Context())
-		if err != nil {
+		var instances []db.Instance
+		if err := gormDB.WithContext(c.Context()).Order("created_at desc").Find(&instances).Error; err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 		return c.JSON(formatInstances(instances))
@@ -188,16 +177,16 @@ func main() {
 			proxyEnabled = *body.ProxyEnabled
 		}
 
-		instance, err := queries.CreateInstance(c.Context(), db.CreateInstanceParams{
+		instance := db.Instance{
 			Name:            body.Name,
-			WebhookUrl:      textFromPtr(body.WebhookUrl),
-			TagID:           textFromPtr(body.TagId),
-			IgnoreGroups:    pgtype.Bool{Bool: ignoreGroups, Valid: true},
-			ReceiveMessages: pgtype.Bool{Bool: receiveMessages, Valid: true},
-			ProxyEnabled:    pgtype.Bool{Bool: proxyEnabled, Valid: true},
-			ProxyUrl:        textFromPtr(body.ProxyUrl),
-		})
-		if err != nil {
+			WebhookUrl:      body.WebhookUrl,
+			TagID:           body.TagId,
+			IgnoreGroups:    &ignoreGroups,
+			ReceiveMessages: &receiveMessages,
+			ProxyEnabled:    &proxyEnabled,
+			ProxyUrl:        body.ProxyUrl,
+		}
+		if err := gormDB.WithContext(c.Context()).Create(&instance).Error; err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 		return c.Status(201).JSON(formatInstance(instance))
@@ -205,8 +194,8 @@ func main() {
 
 	api.Get("/instances/:name", func(c *fiber.Ctx) error {
 		name := c.Params("name")
-		instance, err := queries.GetInstanceByName(c.Context(), name)
-		if err != nil {
+		var instance db.Instance
+		if err := gormDB.WithContext(c.Context()).Where("name = ?", name).First(&instance).Error; err != nil {
 			return c.Status(404).JSON(fiber.Map{"error": "Instance not found"})
 		}
 		return c.JSON(formatInstance(instance))
@@ -223,14 +212,16 @@ func main() {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
 		}
 
-		instance, err := queries.UpdateInstanceStatusByName(c.Context(), db.UpdateInstanceStatusByNameParams{
-			Name:        name,
-			Status:      body.Status,
-			PhoneNumber: textFromPtr(body.PhoneNumber),
-		})
-		if err != nil {
+		updates := map[string]interface{}{
+			"status":       body.Status,
+			"phone_number": body.PhoneNumber,
+		}
+		if err := gormDB.WithContext(c.Context()).Model(&db.Instance{}).Where("name = ?", name).Updates(updates).Error; err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
+
+		var instance db.Instance
+		gormDB.WithContext(c.Context()).Where("name = ?", name).First(&instance)
 		return c.JSON(formatInstance(instance))
 	})
 
@@ -249,37 +240,36 @@ func main() {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
 		}
 
-		instance, err := queries.UpdateInstanceSettingsByName(c.Context(), db.UpdateInstanceSettingsByNameParams{
-			Name:            name,
-			WebhookUrl:      textFromPtr(body.WebhookUrl),
-			IgnoreGroups:    pgtype.Bool{Bool: body.IgnoreGroups, Valid: true},
-			ReceiveMessages: pgtype.Bool{Bool: body.ReceiveMessages, Valid: true},
-			TagID:           textFromPtr(body.TagId),
-			ProxyEnabled:    pgtype.Bool{Bool: body.ProxyEnabled, Valid: true},
-			ProxyUrl:        textFromPtr(body.ProxyUrl),
-		})
-		if err != nil {
+		updates := map[string]interface{}{
+			"webhook_url":      body.WebhookUrl,
+			"ignore_groups":    body.IgnoreGroups,
+			"receive_messages": body.ReceiveMessages,
+			"tag_id":           body.TagId,
+			"proxy_enabled":    body.ProxyEnabled,
+			"proxy_url":        body.ProxyUrl,
+		}
+		if err := gormDB.WithContext(c.Context()).Model(&db.Instance{}).Where("name = ?", name).Updates(updates).Error; err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
+
+		var instance db.Instance
+		gormDB.WithContext(c.Context()).Where("name = ?", name).First(&instance)
 		return c.JSON(formatInstance(instance))
 	})
 
 	api.Delete("/instances/:name", func(c *fiber.Ctx) error {
 		name := c.Params("name")
 
-		// Verify instance exists
-		_, err := queries.GetInstanceByName(c.Context(), name)
-		if err != nil {
+		var instance db.Instance
+		if err := gormDB.WithContext(c.Context()).Where("name = ?", name).First(&instance).Error; err != nil {
 			return c.Status(404).JSON(fiber.Map{"error": "Instance not found"})
 		}
 
-		// Disconnect and remove WhatsApp client if exists
 		if waManager != nil {
 			waManager.RemoveClient(name)
 		}
 
-		err = queries.DeleteInstanceByName(c.Context(), name)
-		if err != nil {
+		if err := gormDB.WithContext(c.Context()).Where("name = ?", name).Delete(&db.Instance{}).Error; err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 		return c.SendStatus(204)
@@ -293,50 +283,41 @@ func main() {
 
 		name := c.Params("name")
 
-		// Verify instance exists
-		instance, err := queries.GetInstanceByName(c.Context(), name)
-		if err != nil {
+		var instance db.Instance
+		if err := gormDB.WithContext(c.Context()).Where("name = ?", name).First(&instance).Error; err != nil {
 			return c.Status(404).JSON(fiber.Map{"error": "Instance not found"})
 		}
 
-		// Get client instance (creates it if needed)
 		client, err := waManager.GetClient(name)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		// Configure settings BEFORE connecting
-		if instance.WebhookUrl.Valid {
-			client.SetWebhook(instance.WebhookUrl.String)
+		if instance.WebhookUrl != nil {
+			client.SetWebhook(*instance.WebhookUrl)
 		}
-		if instance.IgnoreGroups.Valid {
-			client.SetIgnoreGroups(instance.IgnoreGroups.Bool)
+		if instance.IgnoreGroups != nil {
+			client.SetIgnoreGroups(*instance.IgnoreGroups)
 		}
-		if instance.ProxyEnabled.Bool && instance.ProxyUrl.Valid {
-			if err := client.SetProxy(instance.ProxyUrl.String); err != nil {
+		if instance.ProxyEnabled != nil && *instance.ProxyEnabled && instance.ProxyUrl != nil {
+			if err := client.SetProxy(*instance.ProxyUrl); err != nil {
 				log.Printf("Failed to set proxy for instance %s: %v", name, err)
 				return c.Status(400).JSON(fiber.Map{"error": "Invalid proxy URL"})
 			}
 		} else {
-			// Ensure proxy is cleared if disabled/empty
 			_ = client.SetProxy("")
 		}
 
-		// Start connection (will generate QR code if needed)
-		// We use a background context for the connection to ensure it persists
 		ctx := context.Background()
 		err = client.Connect(ctx)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		// Update instance status to connecting
-		queries.UpdateInstanceStatusByName(c.Context(), db.UpdateInstanceStatusByNameParams{
-			Name:   name,
-			Status: "connecting",
+		gormDB.WithContext(c.Context()).Model(&db.Instance{}).Where("name = ?", name).Updates(map[string]interface{}{
+			"status": "connecting",
 		})
 
-		// Wait a bit for QR code to be generated
 		time.Sleep(500 * time.Millisecond)
 
 		qrCode := client.GetQRCode()
@@ -380,12 +361,10 @@ func main() {
 
 		status, phone, _ := waManager.GetStatus(name)
 
-		// If connected and phone changed, update database
 		if status == "connected" && phone != "" {
-			queries.UpdateInstanceStatusByName(c.Context(), db.UpdateInstanceStatusByNameParams{
-				Name:        name,
-				Status:      "connected",
-				PhoneNumber: pgtype.Text{String: phone, Valid: true},
+			gormDB.WithContext(c.Context()).Model(&db.Instance{}).Where("name = ?", name).Updates(map[string]interface{}{
+				"status":       "connected",
+				"phone_number": phone,
 			})
 		}
 
@@ -407,10 +386,8 @@ func main() {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		// Update instance status
-		queries.UpdateInstanceStatusByName(c.Context(), db.UpdateInstanceStatusByNameParams{
-			Name:   name,
-			Status: "disconnected",
+		gormDB.WithContext(c.Context()).Model(&db.Instance{}).Where("name = ?", name).Updates(map[string]interface{}{
+			"status": "disconnected",
 		})
 
 		return c.JSON(fiber.Map{"message": "Disconnected successfully"})
@@ -428,7 +405,7 @@ func main() {
 			To             string `json:"to"`
 			Text           string `json:"text"`
 			SimulateTyping bool   `json:"simulateTyping"`
-			TypingDuration int    `json:"typingDuration"` // milliseconds
+			TypingDuration int    `json:"typingDuration"`
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
@@ -453,7 +430,7 @@ func main() {
 		})
 	})
 
-	// Send text message batch endpoint - uses worker pool for parallel processing
+	// Send text message batch endpoint
 	api.Post("/instances/:name/send-message-batch", func(c *fiber.Ctx) error {
 		if waManager == nil {
 			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
@@ -468,7 +445,7 @@ func main() {
 				SimulateTyping bool   `json:"simulateTyping"`
 				TypingDuration int    `json:"typingDuration"`
 			} `json:"messages"`
-			MaxWorkers int `json:"maxWorkers"` // Number of parallel workers (default: 5)
+			MaxWorkers int `json:"maxWorkers"`
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
@@ -556,15 +533,15 @@ func main() {
 
 		var body struct {
 			To                string `json:"to"`
-			MediaType         string `json:"mediaType"` // image, video, audio, document
+			MediaType         string `json:"mediaType"`
 			Base64Data        string `json:"base64Data"`
-			URL               string `json:"url"` // Alternative to base64Data
+			URL               string `json:"url"`
 			MimeType          string `json:"mimeType"`
-			Caption           string `json:"caption"`           // For image, video, document
-			FileName          string `json:"fileName"`          // For document
-			SimulateRecording bool   `json:"simulateRecording"` // For audio
-			RecordingDuration int    `json:"recordingDuration"` // For audio (ms)
-			PTT               bool   `json:"ptt"`               // For audio (push-to-talk)
+			Caption           string `json:"caption"`
+			FileName          string `json:"fileName"`
+			SimulateRecording bool   `json:"simulateRecording"`
+			RecordingDuration int    `json:"recordingDuration"`
+			PTT               bool   `json:"ptt"`
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
@@ -582,7 +559,6 @@ func main() {
 		var err error
 
 		if body.URL != "" {
-			// Download from URL
 			httpResp, err := http.Get(body.URL)
 			if err != nil {
 				return c.Status(400).JSON(fiber.Map{"error": "Failed to download from URL: " + err.Error()})
@@ -598,14 +574,12 @@ func main() {
 				return c.Status(400).JSON(fiber.Map{"error": "Failed to read URL response: " + err.Error()})
 			}
 		} else {
-			// Decode base64 data
 			mediaData, err = base64.StdEncoding.DecodeString(body.Base64Data)
 			if err != nil {
 				return c.Status(400).JSON(fiber.Map{"error": "Invalid base64 data"})
 			}
 		}
 
-		// Auto-detect mimeType if not provided
 		mimeType := body.MimeType
 		if mimeType == "" {
 			mimeType = http.DetectContentType(mediaData)
@@ -640,7 +614,7 @@ func main() {
 		})
 	})
 
-	// Send media batch endpoint - uses worker pool for parallel processing
+	// Send media batch endpoint
 	api.Post("/instances/:name/send-media-batch", func(c *fiber.Ctx) error {
 		if waManager == nil {
 			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
@@ -661,7 +635,7 @@ func main() {
 				RecordingDuration int    `json:"recordingDuration"`
 				PTT               bool   `json:"ptt"`
 			} `json:"messages"`
-			MaxWorkers int `json:"maxWorkers"` // Number of parallel workers (default: 5)
+			MaxWorkers int `json:"maxWorkers"`
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
@@ -671,16 +645,14 @@ func main() {
 			return c.Status(400).JSON(fiber.Map{"error": "messages array is required"})
 		}
 
-		// Set default max workers
 		maxWorkers := body.MaxWorkers
 		if maxWorkers <= 0 {
 			maxWorkers = 5
 		}
 		if maxWorkers > 20 {
-			maxWorkers = 20 // Cap at 20 workers
+			maxWorkers = 20
 		}
 
-		// Results channel
 		type BatchResult struct {
 			Index     int    `json:"index"`
 			To        string `json:"to"`
@@ -708,12 +680,11 @@ func main() {
 				PTT               bool   `json:"ptt"`
 			}) {
 				defer wg.Done()
-				semaphore <- struct{}{}        // Acquire
-				defer func() { <-semaphore }() // Release
+				semaphore <- struct{}{}
+				defer func() { <-semaphore }()
 
 				result := BatchResult{Index: idx, To: message.To}
 
-				// Validate
 				if message.To == "" || message.MediaType == "" {
 					result.Error = "to and mediaType are required"
 					results[idx] = result
@@ -726,7 +697,6 @@ func main() {
 					return
 				}
 
-				// Get media data
 				var mediaData []byte
 				var err error
 
@@ -760,13 +730,11 @@ func main() {
 					}
 				}
 
-				// Auto-detect mimeType
 				mimeType := message.MimeType
 				if mimeType == "" {
 					mimeType = http.DetectContentType(mediaData)
 				}
 
-				// Send message
 				var resp *whatsapp.SendResponse
 				switch message.MediaType {
 				case "image":
@@ -795,7 +763,6 @@ func main() {
 
 		wg.Wait()
 
-		// Count successes
 		successCount := 0
 		for _, r := range results {
 			if r.Success {
@@ -831,8 +798,8 @@ func main() {
 
 	// Tag routes
 	api.Get("/tags", func(c *fiber.Ctx) error {
-		tags, err := queries.ListTags(c.Context())
-		if err != nil {
+		var tags []db.Tag
+		if err := gormDB.WithContext(c.Context()).Order("name").Find(&tags).Error; err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 		return c.JSON(formatTags(tags))
@@ -851,21 +818,15 @@ func main() {
 			return c.Status(400).JSON(fiber.Map{"error": "Name and color are required"})
 		}
 
-		tag, err := queries.CreateTag(c.Context(), db.CreateTagParams{
-			Name:  body.Name,
-			Color: body.Color,
-		})
-		if err != nil {
+		tag := db.Tag{Name: body.Name, Color: body.Color}
+		if err := gormDB.WithContext(c.Context()).Create(&tag).Error; err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 		return c.Status(201).JSON(formatTag(tag))
 	})
 
 	api.Put("/tags/:id", func(c *fiber.Ctx) error {
-		id, err := parseUUID(c.Params("id"))
-		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
-		}
+		id := c.Params("id")
 
 		var body struct {
 			Name  string `json:"name"`
@@ -875,25 +836,22 @@ func main() {
 			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
 		}
 
-		tag, err := queries.UpdateTag(c.Context(), db.UpdateTagParams{
-			ID:    id,
-			Name:  body.Name,
-			Color: body.Color,
-		})
-		if err != nil {
+		if err := gormDB.WithContext(c.Context()).Model(&db.Tag{}).Where("id = ?", id).Updates(map[string]interface{}{
+			"name":  body.Name,
+			"color": body.Color,
+		}).Error; err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
+
+		var tag db.Tag
+		gormDB.WithContext(c.Context()).Where("id = ?", id).First(&tag)
 		return c.JSON(formatTag(tag))
 	})
 
 	api.Delete("/tags/:id", func(c *fiber.Ctx) error {
-		id, err := parseUUID(c.Params("id"))
-		if err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid ID"})
-		}
+		id := c.Params("id")
 
-		err = queries.DeleteTag(c.Context(), id)
-		if err != nil {
+		if err := gormDB.WithContext(c.Context()).Where("id = ?", id).Delete(&db.Tag{}).Error; err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 		return c.SendStatus(204)
@@ -903,14 +861,12 @@ func main() {
 	log.Fatal(app.Listen(":8080"))
 }
 
-// Auth middleware
 func authMiddleware(c *fiber.Ctx) error {
 	auth := c.Get("Authorization")
 	if auth == "" {
 		return c.Status(401).JSON(fiber.Map{"error": "Authorization header required"})
 	}
 
-	// Support both "Bearer <token>" and just "<token>"
 	token := strings.TrimPrefix(auth, "Bearer ")
 	if token != apiKey {
 		return c.Status(403).JSON(fiber.Map{"error": "Invalid API key"})
@@ -919,96 +875,51 @@ func authMiddleware(c *fiber.Ctx) error {
 	return c.Next()
 }
 
-// Helper functions
-func parseUUID(s string) (pgtype.UUID, error) {
-	var uuid pgtype.UUID
-	err := uuid.Scan(s)
-	return uuid, err
-}
-
-func textFromPtr(s *string) pgtype.Text {
-	if s == nil || *s == "" {
-		return pgtype.Text{Valid: false}
-	}
-	return pgtype.Text{String: *s, Valid: true}
-}
-
-func uuidToString(u pgtype.UUID) string {
-	if !u.Valid {
-		return ""
-	}
-	b := u.Bytes
-	return strings.ToLower(strings.ReplaceAll(
-		strings.ReplaceAll(
-			strings.ReplaceAll(
-				strings.ReplaceAll(
-					strings.ReplaceAll(
-						string([]byte{
-							hexChar(b[0] >> 4), hexChar(b[0] & 0xf),
-							hexChar(b[1] >> 4), hexChar(b[1] & 0xf),
-							hexChar(b[2] >> 4), hexChar(b[2] & 0xf),
-							hexChar(b[3] >> 4), hexChar(b[3] & 0xf),
-							'-',
-							hexChar(b[4] >> 4), hexChar(b[4] & 0xf),
-							hexChar(b[5] >> 4), hexChar(b[5] & 0xf),
-							'-',
-							hexChar(b[6] >> 4), hexChar(b[6] & 0xf),
-							hexChar(b[7] >> 4), hexChar(b[7] & 0xf),
-							'-',
-							hexChar(b[8] >> 4), hexChar(b[8] & 0xf),
-							hexChar(b[9] >> 4), hexChar(b[9] & 0xf),
-							'-',
-							hexChar(b[10] >> 4), hexChar(b[10] & 0xf),
-							hexChar(b[11] >> 4), hexChar(b[11] & 0xf),
-							hexChar(b[12] >> 4), hexChar(b[12] & 0xf),
-							hexChar(b[13] >> 4), hexChar(b[13] & 0xf),
-							hexChar(b[14] >> 4), hexChar(b[14] & 0xf),
-							hexChar(b[15] >> 4), hexChar(b[15] & 0xf),
-						}),
-						"\x00", ""),
-					"\x00", ""),
-				"\x00", ""),
-			"\x00", ""),
-		"\x00", ""))
-}
-
-func hexChar(b byte) byte {
-	if b < 10 {
-		return '0' + b
-	}
-	return 'a' + b - 10
-}
-
 type InstanceResponse struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Status          string `json:"status"`
-	PhoneNumber     string `json:"phoneNumber,omitempty"`
-	TagId           string `json:"tagId,omitempty"`
-	IgnoreGroups    bool   `json:"ignoreGroups"`
-	WebhookUrl      string `json:"webhookUrl,omitempty"`
-	ReceiveMessages bool   `json:"receiveMessages"`
-	ProxyEnabled    bool   `json:"proxyEnabled"`
-	ProxyUrl        string `json:"proxyUrl,omitempty"`
-	CreatedAt       string `json:"createdAt"`
-	UpdatedAt       string `json:"updatedAt"`
+	ID              string  `json:"id"`
+	Name            string  `json:"name"`
+	Status          string  `json:"status"`
+	PhoneNumber     string  `json:"phoneNumber,omitempty"`
+	TagId           string  `json:"tagId,omitempty"`
+	IgnoreGroups    bool    `json:"ignoreGroups"`
+	WebhookUrl      string  `json:"webhookUrl,omitempty"`
+	ReceiveMessages bool    `json:"receiveMessages"`
+	ProxyEnabled    bool    `json:"proxyEnabled"`
+	ProxyUrl        string  `json:"proxyUrl,omitempty"`
+	CreatedAt       string  `json:"createdAt"`
+	UpdatedAt       string  `json:"updatedAt"`
 }
 
 func formatInstance(i db.Instance) InstanceResponse {
-	return InstanceResponse{
-		ID:              uuidToString(i.ID),
-		Name:            i.Name,
-		Status:          i.Status,
-		PhoneNumber:     i.PhoneNumber.String,
-		TagId:           i.TagID.String,
-		IgnoreGroups:    i.IgnoreGroups.Bool,
-		WebhookUrl:      i.WebhookUrl.String,
-		ReceiveMessages: i.ReceiveMessages.Bool,
-		ProxyEnabled:    i.ProxyEnabled.Bool,
-		ProxyUrl:        i.ProxyUrl.String,
-		CreatedAt:       i.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:       i.UpdatedAt.Time.Format("2006-01-02T15:04:05Z"),
+	r := InstanceResponse{
+		ID:        i.ID,
+		Name:      i.Name,
+		Status:    i.Status,
+		CreatedAt: i.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt: i.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
+	if i.PhoneNumber != nil {
+		r.PhoneNumber = *i.PhoneNumber
+	}
+	if i.TagID != nil {
+		r.TagId = *i.TagID
+	}
+	if i.IgnoreGroups != nil {
+		r.IgnoreGroups = *i.IgnoreGroups
+	}
+	if i.ReceiveMessages != nil {
+		r.ReceiveMessages = *i.ReceiveMessages
+	}
+	if i.ProxyEnabled != nil {
+		r.ProxyEnabled = *i.ProxyEnabled
+	}
+	if i.ProxyUrl != nil {
+		r.ProxyUrl = *i.ProxyUrl
+	}
+	if i.WebhookUrl != nil {
+		r.WebhookUrl = *i.WebhookUrl
+	}
+	return r
 }
 
 func formatInstances(instances []db.Instance) []InstanceResponse {
@@ -1028,10 +939,10 @@ type TagResponse struct {
 
 func formatTag(t db.Tag) TagResponse {
 	return TagResponse{
-		ID:        uuidToString(t.ID),
+		ID:        t.ID,
 		Name:      t.Name,
 		Color:     t.Color,
-		CreatedAt: t.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
+		CreatedAt: t.CreatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 }
 
