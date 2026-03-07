@@ -25,6 +25,39 @@ import (
 )
 
 var apiKey string
+var waManager *whatsapp.InstanceManager
+var gormDB *gorm.DB
+
+func scheduleReconnect(instanceName string) {
+	delays := []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second, 60 * time.Second, 2 * time.Minute}
+	for i, delay := range delays {
+		log.Printf("[AutoReconnect] Waiting %v before attempt %d/%d for instance %s", delay, i+1, len(delays), instanceName)
+		time.Sleep(delay)
+
+		if waManager == nil {
+			return
+		}
+		if _, err := waManager.GetClient(instanceName); err != nil {
+			log.Printf("[AutoReconnect] Instance %s no longer exists, stopping", instanceName)
+			return
+		}
+
+		log.Printf("[AutoReconnect] Attempt %d/%d for instance %s", i+1, len(delays), instanceName)
+		_, err := waManager.Connect(context.Background(), instanceName)
+		if err == nil {
+			log.Printf("[AutoReconnect] Successfully reconnected instance %s", instanceName)
+			return
+		}
+		log.Printf("[AutoReconnect] Attempt %d failed for instance %s: %v", i+1, instanceName, err)
+	}
+
+	log.Printf("[AutoReconnect] Giving up on instance %s after %d attempts", instanceName, len(delays))
+	if gormDB != nil {
+		gormDB.Model(&db.Instance{}).Where("name = ?", instanceName).Updates(map[string]interface{}{
+			"status": "disconnected",
+		})
+	}
+}
 
 func main() {
 	// Load .env from parent directory
@@ -43,7 +76,8 @@ func main() {
 	}
 
 	// Connect to database via GORM
-	gormDB, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{})
+	var err error
+	gormDB, err = gorm.Open(postgres.Open(dbURL), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("Unable to connect to database: %v", err)
 	}
@@ -54,7 +88,7 @@ func main() {
 	}
 
 	// Initialize WhatsApp manager
-	waManager, err := whatsapp.NewInstanceManager(dbURL)
+	waManager, err = whatsapp.NewInstanceManager(dbURL)
 	if err != nil {
 		log.Printf("Warning: Failed to initialize WhatsApp manager: %v", err)
 		waManager = nil
@@ -98,7 +132,7 @@ func main() {
 				go func(instanceName string) {
 					defer wg.Done()
 					log.Printf("Auto-reconnecting instance: %s", instanceName)
-					_, err := waManager.Connect(context.Background(), instanceName)
+					client, err := waManager.Connect(context.Background(), instanceName)
 					if err != nil {
 						log.Printf("Failed to auto-reconnect instance %s: %v", instanceName, err)
 						gormDB.Model(&db.Instance{}).Where("name = ?", instanceName).Updates(map[string]interface{}{
@@ -106,6 +140,8 @@ func main() {
 						})
 					} else {
 						log.Printf("Successfully auto-reconnected instance: %s", instanceName)
+						instName := instanceName
+						client.SetReconnectFunc(func() { scheduleReconnect(instName) })
 					}
 				}(inst.Name)
 			}
@@ -373,6 +409,9 @@ func main() {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 
+		instanceName := name
+		client.SetReconnectFunc(func() { scheduleReconnect(instanceName) })
+
 		gormDB.WithContext(c.Context()).Model(&db.Instance{}).Where("name = ?", name).Updates(map[string]interface{}{
 			"status": "connecting",
 		})
@@ -440,6 +479,9 @@ func main() {
 
 		name := c.Params("name")
 
+		if c2, e := waManager.GetClient(name); e == nil {
+			c2.DisableAutoReconnect()
+		}
 		err := waManager.Disconnect(name)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})

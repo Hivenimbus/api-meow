@@ -5,7 +5,8 @@
       "Bash(go get:*)",
       "Bash(go mod:*)",
       "Bash(go build:*)",
-      "Bash(go env:*)"
+      "Bash(go env:*)",
+      "Bash(powershell.exe:*)"
     ]
   }
 }

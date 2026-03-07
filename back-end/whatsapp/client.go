@@ -205,6 +205,9 @@ func (w *WAClient) eventHandler(evt interface{}) {
 			w.phone = w.client.Store.ID.User
 		}
 		webhookURL := w.webhookURL
+		if w.reconnectFn != nil {
+			w.autoReconnect = true
+		}
 		w.mu.Unlock()
 
 		select {
@@ -230,6 +233,8 @@ func (w *WAClient) eventHandler(evt interface{}) {
 		w.status = "disconnected"
 		w.qrCode = ""
 		webhookURL := w.webhookURL
+		shouldReconnect := w.autoReconnect
+		reconnectFn := w.reconnectFn
 		w.mu.Unlock()
 
 		// Send webhook event
@@ -244,11 +249,16 @@ func (w *WAClient) eventHandler(evt interface{}) {
 			})
 		}
 
+		if shouldReconnect && reconnectFn != nil {
+			go reconnectFn()
+		}
+
 	case *events.LoggedOut:
 		w.mu.Lock()
 		w.status = "disconnected"
 		w.phone = ""
 		w.qrCode = ""
+		w.autoReconnect = false
 		webhookURL := w.webhookURL
 		w.mu.Unlock()
 
