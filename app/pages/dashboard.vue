@@ -356,14 +356,71 @@
             </label>
           </div>
 
-          <div v-if="editSettings.proxyEnabled" class="transition-all duration-300 ease-in-out">
-            <label class="block text-sm font-medium text-slate-300 mb-2">URL do Proxy</label>
-            <input
-              v-model="editSettings.proxyUrl"
-              type="text"
-              placeholder="http://user:pass@proxy.com:8080"
-              class="w-full px-4 py-3 bg-slate-900/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 transition-all"
-            />
+          <div v-if="editSettings.proxyEnabled" class="transition-all duration-300 ease-in-out space-y-3">
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-2">URL do Proxy</label>
+              <div class="flex gap-2">
+                <input
+                  v-model="editSettings.proxyUrl"
+                  type="text"
+                  placeholder="http://user:pass@proxy.com:8080"
+                  class="flex-1 px-4 py-3 bg-slate-900/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                  @input="proxyTestResult = null"
+                />
+                <button
+                  v-if="editSettings.proxyUrl"
+                  @click="handleTestProxy"
+                  :disabled="proxyTesting"
+                  class="px-4 py-3 bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium rounded-xl transition-all disabled:opacity-50 whitespace-nowrap"
+                >
+                  {{ proxyTesting ? 'Testando...' : 'Testar' }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Proxy test result -->
+            <div v-if="proxyTestResult" :class="[
+              'p-3 rounded-xl border text-sm',
+              proxyTestResult.success
+                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+                : 'bg-red-500/10 border-red-500/20 text-red-300'
+            ]">
+              <template v-if="proxyTestResult.success">
+                <div class="flex items-center gap-2 font-medium mb-2">
+                  <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  </svg>
+                  Proxy funcionando
+                </div>
+                <div class="space-y-0.5 text-slate-300 text-xs mb-2">
+                  <p v-if="proxyTestResult.ip"><span class="text-slate-400">IP:</span> {{ proxyTestResult.ip }}</p>
+                  <p v-if="proxyTestResult.city || proxyTestResult.region || proxyTestResult.country">
+                    <span class="text-slate-400">Local:</span>
+                    {{ [proxyTestResult.city, proxyTestResult.region, proxyTestResult.country].filter(Boolean).join(', ') }}
+                  </p>
+                  <p v-if="proxyTestResult.isp"><span class="text-slate-400">ISP:</span> {{ proxyTestResult.isp }}</p>
+                </div>
+                <div :class="[
+                  'flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg w-fit',
+                  proxyTestResult.waReachable
+                    ? 'bg-emerald-500/15 text-emerald-300'
+                    : 'bg-amber-500/15 text-amber-300'
+                ]">
+                  <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                  </svg>
+                  {{ proxyTestResult.waReachable ? 'Servidores do WhatsApp acessíveis' : 'Servidores do WhatsApp inacessíveis' }}
+                </div>
+              </template>
+              <template v-else>
+                <div class="flex items-center gap-2 font-medium">
+                  <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  {{ proxyTestResult.error || 'Proxy não está funcionando' }}
+                </div>
+              </template>
+            </div>
           </div>
         </div>
 
@@ -458,6 +515,18 @@ const editSettings = ref({
   proxyEnabled: false,
   proxyUrl: ''
 })
+
+const proxyTesting = ref(false)
+const proxyTestResult = ref<{
+  success: boolean
+  ip?: string
+  country?: string
+  region?: string
+  city?: string
+  isp?: string
+  waReachable?: boolean
+  error?: string
+} | null>(null)
 
 // Instances from API
 const instances = ref<Instance[]>([])
@@ -604,7 +673,22 @@ const openSettingsModal = (instance: Instance) => {
     proxyEnabled: instance.settings?.proxyEnabled ?? false,
     proxyUrl: instance.settings?.proxyUrl || ''
   }
+  proxyTestResult.value = null
   showSettingsModal.value = true
+}
+
+const handleTestProxy = async () => {
+  if (!editSettings.value.proxyUrl) return
+  proxyTesting.value = true
+  proxyTestResult.value = null
+  try {
+    const result = await api.testProxy(editSettings.value.proxyUrl)
+    proxyTestResult.value = result
+  } catch (e) {
+    proxyTestResult.value = { success: false, error: 'Erro ao testar proxy' }
+  } finally {
+    proxyTesting.value = false
+  }
 }
 
 const saveSettings = async () => {

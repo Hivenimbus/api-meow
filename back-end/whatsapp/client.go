@@ -29,10 +29,30 @@ type WAClient struct {
 	connectedAt  time.Time // Track when client connected to filter offline messages
 	mu           sync.RWMutex
 
+	// Auto-reconnect
+	reconnectFn   func()
+	autoReconnect bool
+
 	// Channels for events
 	QRCodeChan    chan string
 	ConnectedChan chan bool
 	ErrorChan     chan error
+}
+
+// SetReconnectFunc sets the function to call when the connection drops unexpectedly.
+// Auto-reconnect will be enabled once the client successfully connects.
+func (w *WAClient) SetReconnectFunc(fn func()) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.reconnectFn = fn
+}
+
+// DisableAutoReconnect prevents the client from reconnecting after a disconnect.
+// Call this before an intentional disconnect.
+func (w *WAClient) DisableAutoReconnect() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.autoReconnect = false
 }
 
 // NewWAClient creates a new WhatsApp client wrapper

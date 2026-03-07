@@ -185,6 +185,26 @@ export const useApi = () => {
         return response.json()
     }
 
+    const testProxy = async (proxyUrl: string): Promise<{
+        success: boolean
+        ip?: string
+        country?: string
+        region?: string
+        city?: string
+        isp?: string
+        org?: string
+        waReachable?: boolean
+        error?: string
+    }> => {
+        const response = await fetch(`${API_BASE_URL}/proxy/test`, {
+            method: 'POST',
+            headers: headers(),
+            body: JSON.stringify({ proxyUrl })
+        })
+        if (!response.ok) throw new Error('Failed to test proxy')
+        return response.json()
+    }
+
     const disconnectInstance = async (name: string): Promise<void> => {
         const response = await fetch(`${API_BASE_URL}/instances/${name}/disconnect`, {
             method: 'POST',
@@ -209,6 +229,8 @@ export const useApi = () => {
         connectInstance,
         getQRCode,
         getWhatsAppStatus,
-        disconnectInstance
+        disconnectInstance,
+        // Proxy
+        testProxy
     }
 }

@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -273,6 +275,63 @@ func main() {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
 		return c.SendStatus(204)
+	})
+
+	// Proxy test route
+	api.Post("/proxy/test", func(c *fiber.Ctx) error {
+		var body struct {
+			ProxyUrl string `json:"proxyUrl"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
+		}
+		if body.ProxyUrl == "" {
+			return c.Status(400).JSON(fiber.Map{"error": "proxyUrl is required"})
+		}
+
+		proxyURL, err := url.Parse(body.ProxyUrl)
+		if err != nil {
+			return c.JSON(fiber.Map{"success": false, "error": "URL de proxy inválida"})
+		}
+
+		transport := &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+		}
+		client := &http.Client{
+			Transport: transport,
+			Timeout:   10 * time.Second,
+		}
+
+		// Get geo info
+		resp, err := client.Get("http://ip-api.com/json")
+		if err != nil {
+			return c.JSON(fiber.Map{"success": false, "error": "Proxy não está funcionando: " + err.Error()})
+		}
+		defer resp.Body.Close()
+
+		var geoData map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&geoData); err != nil {
+			return c.JSON(fiber.Map{"success": false, "error": "Falha ao ler resposta da proxy"})
+		}
+
+		// Test WhatsApp server reachability through proxy
+		waReachable := false
+		waResp, waErr := client.Get("https://web.whatsapp.com")
+		if waErr == nil {
+			waResp.Body.Close()
+			waReachable = true
+		}
+
+		return c.JSON(fiber.Map{
+			"success":      true,
+			"ip":           geoData["query"],
+			"country":      geoData["country"],
+			"region":       geoData["regionName"],
+			"city":         geoData["city"],
+			"isp":          geoData["isp"],
+			"org":          geoData["org"],
+			"waReachable":  waReachable,
+		})
 	})
 
 	// WhatsApp connection routes
