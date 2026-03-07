@@ -393,6 +393,28 @@ func main() {
 		return c.JSON(fiber.Map{"message": "Disconnected successfully"})
 	})
 
+	// Set presence endpoint
+	api.Post("/instances/:name/set-presence", func(c *fiber.Ctx) error {
+		if waManager == nil {
+			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
+		}
+
+		name := c.Params("name")
+
+		var body struct {
+			Available bool `json:"available"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid request body"})
+		}
+
+		if err := waManager.SetPresence(name, body.Available); err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{"message": "Presence updated"})
+	})
+
 	// Send text message endpoint
 	api.Post("/instances/:name/send-message", func(c *fiber.Ctx) error {
 		if waManager == nil {

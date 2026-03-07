@@ -418,3 +418,16 @@ func (m *InstanceManager) GetContacts(instanceID string) ([]ContactInfo, error) 
 
 	return client.GetContacts(m.ctx)
 }
+
+// SetPresence sets the online/offline presence for the specified instance
+func (m *InstanceManager) SetPresence(instanceID string, available bool) error {
+	m.mu.RLock()
+	client, exists := m.clients[instanceID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("client not found for instance %s", instanceID)
+	}
+
+	return client.SetPresence(available)
+}

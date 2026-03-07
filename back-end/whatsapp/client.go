@@ -870,3 +870,14 @@ func (w *WAClient) GetContacts(ctx context.Context) ([]ContactInfo, error) {
 
 	return result, nil
 }
+
+// SetPresence sets the online/offline presence for this instance
+func (w *WAClient) SetPresence(available bool) error {
+	if !w.client.IsConnected() {
+		return fmt.Errorf("client is not connected")
+	}
+	if available {
+		return w.client.SendPresence(context.Background(), types.PresenceAvailable)
+	}
+	return w.client.SendPresence(context.Background(), types.PresenceUnavailable)
+}
