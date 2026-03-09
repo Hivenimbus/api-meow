@@ -88,7 +88,7 @@ func main() {
 	}
 
 	// Initialize WhatsApp manager
-	waManager, err = whatsapp.NewInstanceManager(dbURL)
+	waManager, err = whatsapp.NewInstanceManager(dbURL, gormDB)
 	if err != nil {
 		log.Printf("Warning: Failed to initialize WhatsApp manager: %v", err)
 		waManager = nil
@@ -464,6 +464,28 @@ func main() {
 				"status":       "connected",
 				"phone_number": phone,
 			})
+		} else if status == "disconnected" && phone == "" {
+			// Client not in memory — check if there's a saved session to auto-reconnect
+			var instance db.Instance
+			if gormDB.WithContext(c.Context()).
+				Where("name = ? AND status = 'connected' AND phone_number IS NOT NULL AND phone_number != ''", name).
+				First(&instance).Error == nil && instance.PhoneNumber != nil {
+				phoneNum := *instance.PhoneNumber
+				go func() {
+					client, err := waManager.ConnectWithPhone(name, phoneNum)
+					if err != nil {
+						log.Printf("[AutoReconnect] Failed to reconnect instance %s: %v", name, err)
+						return
+					}
+					instName := name
+					client.SetReconnectFunc(func() { scheduleReconnect(instName) })
+					log.Printf("[AutoReconnect] Triggered reconnect for instance %s (phone: %s)", name, phoneNum)
+				}()
+				return c.JSON(fiber.Map{
+					"status": "connecting",
+					"phone":  phoneNum,
+				})
+			}
 		}
 
 		return c.JSON(fiber.Map{

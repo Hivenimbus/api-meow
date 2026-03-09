@@ -11,19 +11,27 @@ import (
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
+	"google.golang.org/protobuf/proto"
+	"gorm.io/gorm"
 )
 
 // InstanceManager manages multiple WhatsApp client instances
 type InstanceManager struct {
 	container *sqlstore.Container
 	clients   map[string]*WAClient
+	db        *gorm.DB
 	mu        sync.RWMutex
 	log       waLog.Logger
 	ctx       context.Context
 }
 
+func init() {
+	// Force WhatsApp to send full history sync on new device connections
+	store.DeviceProps.RequireFullSync = proto.Bool(true)
+}
+
 // NewInstanceManager creates a new WhatsApp instance manager
-func NewInstanceManager(dbURL string) (*InstanceManager, error) {
+func NewInstanceManager(dbURL string, db *gorm.DB) (*InstanceManager, error) {
 	// Create logger
 	log := waLog.Stdout("WhatsApp", "INFO", true)
 
@@ -42,11 +50,26 @@ func NewInstanceManager(dbURL string) (*InstanceManager, error) {
 		return nil, fmt.Errorf("failed to upgrade database schema: %w", err)
 	}
 
+	// Create chat_jids table for history sync and real-time interaction tracking
+	if db != nil {
+		if err := db.Exec(`
+			CREATE TABLE IF NOT EXISTS chat_jids (
+				instance_jid TEXT,
+				jid          TEXT,
+				name         TEXT NOT NULL DEFAULT '',
+				push_name    TEXT NOT NULL DEFAULT '',
+				PRIMARY KEY (instance_jid, jid)
+			)`).Error; err != nil {
+			log.Warnf("Failed to create chat_jids table: %v", err)
+		}
+	}
+
 	log.Infof("WhatsApp store initialized successfully")
 
 	manager := &InstanceManager{
 		container: container,
 		clients:   make(map[string]*WAClient),
+		db:        db,
 		log:       log,
 		ctx:       ctx,
 	}
@@ -142,7 +165,7 @@ func (m *InstanceManager) createClientWithDevice(instanceID string, deviceStore 
 	waClient := whatsmeow.NewClient(deviceStore, clientLog)
 
 	// Create our wrapper
-	client := NewWAClient(instanceID, waClient)
+	client := NewWAClient(instanceID, waClient, m.db)
 	m.clients[instanceID] = client
 
 	return client, nil
@@ -187,7 +210,7 @@ func (m *InstanceManager) createClient(instanceID string, phoneNumber string) (*
 	waClient := whatsmeow.NewClient(deviceStore, clientLog)
 
 	// Create our wrapper
-	client := NewWAClient(instanceID, waClient)
+	client := NewWAClient(instanceID, waClient, m.db)
 
 	m.clients[instanceID] = client
 
@@ -404,6 +427,46 @@ func (m *InstanceManager) SendDocumentMessage(instanceID string, recipient strin
 	}
 
 	return client.SendDocumentMessage(m.ctx, recipient, docData, mimeType, fileName, caption)
+}
+
+// ConnectWithPhone creates (or reuses) a client for instanceID using a known phone number
+// to find the existing whatsmeow device store, then initiates connection.
+// Used for auto-reconnect when the client is not in memory but a saved session exists.
+// Uses GetAllDevices + ID.User matching (like RestoreClients) to find the AD-format JID device.
+func (m *InstanceManager) ConnectWithPhone(instanceID, phoneNumber string) (*WAClient, error) {
+	m.mu.RLock()
+	if client, exists := m.clients[instanceID]; exists {
+		m.mu.RUnlock()
+		return client, nil
+	}
+	m.mu.RUnlock()
+
+	// Scan all devices to find the one matching the phone number.
+	// Devices are stored with AD JIDs (e.g. "5511999:12@s.whatsapp.net"), so we can't
+	// query by a simple non-AD JID — we must scan and match by device.ID.User.
+	devices, err := m.container.GetAllDevices(m.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get devices: %w", err)
+	}
+	var foundDevice *store.Device
+	for _, device := range devices {
+		if device.ID != nil && device.ID.User == phoneNumber {
+			foundDevice = device
+			break
+		}
+	}
+	if foundDevice == nil {
+		return nil, fmt.Errorf("no saved session found for phone %s", phoneNumber)
+	}
+
+	client, err := m.createClientWithDevice(instanceID, foundDevice)
+	if err != nil {
+		return nil, err
+	}
+	if err := client.Connect(m.ctx); err != nil {
+		return nil, err
+	}
+	return client, nil
 }
 
 // GetContacts retrieves contacts for the specified instance

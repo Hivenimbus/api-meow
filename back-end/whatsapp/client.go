@@ -4,10 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
-
-	"strings"
 
 	"github.com/skip2/go-qrcode"
 	"go.mau.fi/whatsmeow"
@@ -15,12 +14,14 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
+	"gorm.io/gorm"
 )
 
 // WAClient wraps a whatsmeow client with additional functionality
 type WAClient struct {
 	instanceID   string
 	client       *whatsmeow.Client
+	db           *gorm.DB
 	qrCode       string
 	status       string // disconnected, connecting, connected
 	phone        string
@@ -56,10 +57,11 @@ func (w *WAClient) DisableAutoReconnect() {
 }
 
 // NewWAClient creates a new WhatsApp client wrapper
-func NewWAClient(instanceID string, client *whatsmeow.Client) *WAClient {
+func NewWAClient(instanceID string, client *whatsmeow.Client, db *gorm.DB) *WAClient {
 	wac := &WAClient{
 		instanceID:    instanceID,
 		client:        client,
+		db:            db,
 		status:        "disconnected",
 		QRCodeChan:    make(chan string, 10),
 		ConnectedChan: make(chan bool, 1),
@@ -76,12 +78,17 @@ func NewWAClient(instanceID string, client *whatsmeow.Client) *WAClient {
 func (w *WAClient) Connect(ctx context.Context) error {
 	w.mu.Lock()
 
-	// If status is "connecting" (e.g., QR code displayed but not scanned),
-	// disconnect first to allow a fresh reconnection.
-	// NOTE: IsConnected() returns true even during QR scan (WebSocket is open),
-	// so we cannot rely on it to distinguish "waiting for QR" from "actually connecting".
-	// The safest approach is to always reset when asked to connect again.
+	// If status is "connecting", behavior depends on whether the device is already registered:
+	// - Store.ID != nil (already logged in): connection is in progress from another goroutine,
+	//   return nil to avoid killing it (prevents race condition on server restart).
+	// - Store.ID == nil (QR scan in progress): reset to generate a fresh QR code.
 	if w.status == "connecting" {
+		if w.client.Store.ID != nil {
+			// Already logged in — don't interfere with ongoing connection
+			w.mu.Unlock()
+			return nil
+		}
+		// Not yet logged in (QR scan) — reset for a fresh QR
 		w.mu.Unlock()
 		w.client.Disconnect()
 		w.mu.Lock()
@@ -285,7 +292,11 @@ func (w *WAClient) eventHandler(evt interface{}) {
 	case *events.StreamError:
 		w.ErrorChan <- fmt.Errorf("stream error: %s", v.Code)
 
+	case *events.HistorySync:
+		go w.processHistorySync(v)
+
 	case *events.Message:
+		go w.saveInteractionJID(v)
 		w.handleIncomingMessage(v)
 	}
 }
@@ -870,35 +881,252 @@ func (w *WAClient) SendDocumentMessage(ctx context.Context, recipient string, do
 	}, nil
 }
 
-// GetContacts retrieves all contacts from the store (excluding groups)
-func (w *WAClient) GetContacts(ctx context.Context) ([]ContactInfo, error) {
-	if !w.client.IsConnected() {
-		return nil, fmt.Errorf("client is not connected")
+// processHistorySync saves conversation JIDs from the WhatsApp history sync event
+func (w *WAClient) processHistorySync(v *events.HistorySync) {
+	if w.db == nil || w.client.Store.ID == nil {
+		return
 	}
+	ourJID := w.client.Store.ID.String()
 
-	// Get all contacts from the store
-	contacts, err := w.client.Store.Contacts.GetAllContacts(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get contacts: %w", err)
-	}
-
-	var result []ContactInfo
-	for jid, contact := range contacts {
-		// Filter out groups - only include user JIDs
-		if jid.Server != types.DefaultUserServer {
+	for _, conv := range v.Data.GetConversations() {
+		jidStr := conv.GetID()
+		if jidStr == "" || strings.Contains(jidStr, "@g.us") || strings.Contains(jidStr, "@broadcast") {
 			continue
 		}
 
-		result = append(result, ContactInfo{
-			JID:          jid.String(),
-			PhoneNumber:  jid.User,
-			Name:         contact.FullName,
-			PushName:     contact.PushName,
-			BusinessName: contact.BusinessName,
-		})
+		displayName := conv.GetDisplayName()
+		if displayName == "" {
+			displayName = conv.GetName()
+		}
+
+		w.db.Exec(`
+			INSERT INTO chat_jids (instance_jid, jid, name)
+			VALUES (?, ?, ?)
+			ON CONFLICT (instance_jid, jid) DO UPDATE SET name = EXCLUDED.name WHERE EXCLUDED.name != ''`,
+			ourJID, jidStr, displayName)
+
+		// Also capture senders from individual messages
+		for _, histMsg := range conv.GetMessages() {
+			if histMsg.GetMessage() == nil || histMsg.GetMessage().GetKey() == nil {
+				continue
+			}
+			msgJID := histMsg.GetMessage().GetKey().GetRemoteJID()
+			if msgJID == "" || strings.Contains(msgJID, "@g.us") || strings.Contains(msgJID, "@broadcast") {
+				continue
+			}
+			w.db.Exec(`
+				INSERT INTO chat_jids (instance_jid, jid, name)
+				VALUES (?, ?, ?)
+				ON CONFLICT (instance_jid, jid) DO NOTHING`,
+				ourJID, msgJID, "")
+		}
+	}
+}
+
+// saveInteractionJID saves a contact JID from real-time message interactions
+func (w *WAClient) saveInteractionJID(v *events.Message) {
+	if w.db == nil || w.client.Store.ID == nil {
+		return
+	}
+	jidStr := v.Info.Chat.String()
+	if strings.Contains(jidStr, "@g.us") || strings.Contains(jidStr, "@broadcast") || strings.Contains(jidStr, "@newsletter") {
+		return
+	}
+	ourJID := w.client.Store.ID.String()
+	pushName := v.Info.PushName
+
+	w.db.Exec(`
+		INSERT INTO chat_jids (instance_jid, jid, push_name)
+		VALUES (?, ?, ?)
+		ON CONFLICT (instance_jid, jid) DO UPDATE SET push_name = EXCLUDED.push_name WHERE EXCLUDED.push_name != ''`,
+		ourJID, jidStr, pushName)
+}
+
+// resolveToPhone resolves any JID string (regular @s.whatsapp.net or LID @lid) to a phone number.
+// Returns "" if the JID cannot be mapped to a phone number.
+func (w *WAClient) resolveToPhone(ctx context.Context, jidStr string) (phone string, canonicalJID string) {
+	jid, err := types.ParseJID(jidStr)
+	if err != nil {
+		return "", ""
+	}
+	if jid.Server == types.DefaultUserServer {
+		return jid.User, jidStr
+	}
+	// LID (Linked Identity) — use whatsmeow's built-in LID store (has in-memory cache)
+	// whatsmeow_lid_map stores only the user parts (e.g. "12345678" not "12345678@lid")
+	// so we must use the native API instead of raw SQL to avoid format mismatch.
+	if jid.Server == types.HiddenUserServer && w.client.Store != nil {
+		pnJID, err := w.client.Store.LIDs.GetPNForLID(ctx, jid.ToNonAD())
+		if err == nil && !pnJID.IsEmpty() && pnJID.Server == types.DefaultUserServer {
+			return pnJID.User, pnJID.User + "@" + types.DefaultUserServer
+		}
+	}
+	return "", ""
+}
+
+// FetchContacts retrieves contacts from 5 sources, deduplicates, and applies anti-spam filters.
+// Handles modern WhatsApp LID (Linked Identity) JIDs via whatsmeow_lid_map.
+func (w *WAClient) FetchContacts(ctx context.Context) ([]ContactInfo, error) {
+	seen := make(map[string]*ContactInfo) // keyed by phone number
+
+	// Pre-load all LID→PN mappings into in-memory cache in one bulk query.
+	// FillCache is not on the LIDStore interface, so use a type assertion.
+	// Without this, resolveToPhone makes one DB query per LID contact (very slow).
+	if w.client.Store != nil && w.client.Store.LIDs != nil {
+		type lidCacheFiller interface {
+			FillCache(ctx context.Context) error
+		}
+		if filler, ok := w.client.Store.LIDs.(lidCacheFiller); ok {
+			_ = filler.FillCache(ctx)
+		}
+	}
+
+	// Source 1 & 3: whatsmeow_contacts + Memory Store (GetAllContacts covers both)
+	if w.client.Store.ID != nil {
+		contacts, err := w.client.Store.Contacts.GetAllContacts(ctx)
+		if err == nil {
+			for jid, contact := range contacts {
+				phone, canonicalJID := w.resolveToPhone(ctx, jid.String())
+				if phone == "" {
+					continue
+				}
+				name := bestName(contact.FullName, contact.BusinessName, contact.PushName)
+				seen[phone] = &ContactInfo{
+					JID:          canonicalJID,
+					PhoneNumber:  phone,
+					Name:         name,
+					PushName:     contact.PushName,
+					BusinessName: contact.BusinessName,
+				}
+			}
+		}
+	}
+
+	if w.db != nil && w.client.Store.ID != nil {
+		ourJID := w.client.Store.ID.String()
+
+		// Source 2: chat_jids (history sync data)
+		type chatJIDRow struct {
+			Jid      string
+			Name     string
+			PushName string
+		}
+		var chatRows []chatJIDRow
+		w.db.Raw(`SELECT jid, name, push_name FROM chat_jids WHERE instance_jid = ?`, ourJID).Scan(&chatRows)
+		for _, row := range chatRows {
+			phone, canonicalJID := w.resolveToPhone(ctx, row.Jid)
+			if phone == "" {
+				continue
+			}
+			name := bestName(row.Name, "", row.PushName)
+			if existing, exists := seen[phone]; !exists {
+				seen[phone] = &ContactInfo{
+					JID:         canonicalJID,
+					PhoneNumber: phone,
+					Name:        name,
+					PushName:    row.PushName,
+				}
+			} else if existing.Name == "" && existing.PushName == "" {
+				if name != "" {
+					existing.Name = name
+				}
+				if row.PushName != "" {
+					existing.PushName = row.PushName
+				}
+			}
+		}
+
+		// Source 4: whatsmeow_chat_settings (chats with any settings configured)
+		type chatSettingsRow struct {
+			ChatJid string
+		}
+		var settingsRows []chatSettingsRow
+		w.db.Raw(`SELECT chat_jid FROM whatsmeow_chat_settings WHERE our_jid = ? AND chat_jid NOT LIKE '%@g.us' AND chat_jid NOT LIKE '%@broadcast'`, ourJID).Scan(&settingsRows)
+		for _, row := range settingsRows {
+			phone, canonicalJID := w.resolveToPhone(ctx, row.ChatJid)
+			if phone == "" {
+				continue
+			}
+			if _, exists := seen[phone]; !exists {
+				seen[phone] = &ContactInfo{
+					JID:         canonicalJID,
+					PhoneNumber: phone,
+				}
+			}
+		}
+
+		// Source 5: whatsmeow_message_secrets (every chat where encrypted messages were exchanged)
+		type msgSecretRow struct {
+			ChatJid   string
+			SenderJid string
+		}
+		var secretRows []msgSecretRow
+		w.db.Raw(`SELECT DISTINCT chat_jid, sender_jid FROM whatsmeow_message_secrets
+			WHERE our_jid = ?
+			AND chat_jid NOT LIKE '%@g.us'
+			AND chat_jid NOT LIKE '%@broadcast'
+			AND chat_jid NOT LIKE '%@newsletter'`, ourJID).Scan(&secretRows)
+		for _, row := range secretRows {
+			for _, jidStr := range []string{row.ChatJid, row.SenderJid} {
+				if jidStr == "" {
+					continue
+				}
+				phone, canonicalJID := w.resolveToPhone(ctx, jidStr)
+				if phone == "" {
+					continue
+				}
+				if _, exists := seen[phone]; !exists {
+					seen[phone] = &ContactInfo{
+						JID:         canonicalJID,
+						PhoneNumber: phone,
+					}
+				}
+			}
+		}
+	}
+
+	// Apply anti-spam filters and build result
+	var result []ContactInfo
+	for phone, info := range seen {
+		// Determine effective name (prioritize: Name > PushName > "")
+		name := info.Name
+		if name == "" {
+			name = info.PushName
+		}
+		// If name equals the phone number, treat as unnamed
+		if name == phone || name == "+"+phone {
+			name = ""
+		}
+
+		// Contacts without a saved name: apply filters
+		if name == "" {
+			// Discard numbers with 14+ digits (bots/spam/very long numbers)
+			if len(phone) >= 14 {
+				continue
+			}
+		}
+
+		info.Name = name
+		result = append(result, *info)
 	}
 
 	return result, nil
+}
+
+// bestName returns the best available name from the provided candidates (priority order)
+func bestName(fullName, businessName, pushName string) string {
+	if fullName != "" {
+		return fullName
+	}
+	if businessName != "" {
+		return businessName
+	}
+	return pushName
+}
+
+// GetContacts retrieves contacts (calls FetchContacts for backwards compatibility)
+func (w *WAClient) GetContacts(ctx context.Context) ([]ContactInfo, error) {
+	return w.FetchContacts(ctx)
 }
 
 // SetPresence sets the online/offline presence for this instance
