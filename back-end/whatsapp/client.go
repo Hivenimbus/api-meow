@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/skip2/go-qrcode"
@@ -509,8 +510,21 @@ func (w *WAClient) GetQRCode() string {
 // GetStatus returns the current connection status and phone number
 func (w *WAClient) GetStatus() (string, string) {
 	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return w.status, w.phone
+	status := w.status
+	phone := w.phone
+	w.mu.RUnlock()
+
+	// If cached status says connected, validate against the actual socket state
+	if status == "connected" && !w.client.IsConnected() {
+		w.mu.Lock()
+		if w.status == "connected" {
+			w.status = "disconnected"
+		}
+		w.mu.Unlock()
+		return "disconnected", phone
+	}
+
+	return status, phone
 }
 
 // IsConnected returns whether the client is connected

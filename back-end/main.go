@@ -464,8 +464,8 @@ func main() {
 				"status":       "connected",
 				"phone_number": phone,
 			})
-		} else if status == "disconnected" && phone == "" {
-			// Client not in memory — check if there's a saved session to auto-reconnect
+		} else if status == "disconnected" && phone == "" && !waManager.HasClient(name) {
+			// Client not in memory (e.g., server restart) — check if there's a saved session to auto-reconnect
 			var instance db.Instance
 			if gormDB.WithContext(c.Context()).
 				Where("name = ? AND status = 'connected' AND phone_number IS NOT NULL AND phone_number != ''", name).

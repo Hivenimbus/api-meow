@@ -338,6 +338,14 @@ func (m *InstanceManager) GetQRCode(instanceID string) (string, error) {
 	return client.GetQRCode(), nil
 }
 
+// HasClient returns whether an instance client is loaded in memory
+func (m *InstanceManager) HasClient(instanceID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, exists := m.clients[instanceID]
+	return exists
+}
+
 // GetStatus returns the connection status for an instance
 func (m *InstanceManager) GetStatus(instanceID string) (string, string, error) {
 	m.mu.RLock()
