@@ -28,6 +28,9 @@ var apiKey string
 var waManager *whatsapp.InstanceManager
 var gormDB *gorm.DB
 
+// httpClient is a shared HTTP client with a timeout to prevent hanging goroutines
+var httpClient = &http.Client{Timeout: 30 * time.Second}
+
 func scheduleReconnect(instanceName string) {
 	delays := []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second, 60 * time.Second, 2 * time.Minute}
 	for i, delay := range delays {
@@ -80,6 +83,13 @@ func main() {
 	gormDB, err = gorm.Open(postgres.Open(dbURL), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("Unable to connect to database: %v", err)
+	}
+
+	// Configure connection pool
+	if sqlDB, err := gormDB.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(25)
+		sqlDB.SetMaxIdleConns(10)
+		sqlDB.SetConnMaxLifetime(5 * time.Minute)
 	}
 
 	// Create/update tables automatically
@@ -706,7 +716,7 @@ func main() {
 		var err error
 
 		if body.URL != "" {
-			httpResp, err := http.Get(body.URL)
+			httpResp, err := httpClient.Get(body.URL)
 			if err != nil {
 				return c.Status(400).JSON(fiber.Map{"error": "Failed to download from URL: " + err.Error()})
 			}
@@ -848,7 +858,7 @@ func main() {
 				var err error
 
 				if message.URL != "" {
-					httpResp, err := http.Get(message.URL)
+					httpResp, err := httpClient.Get(message.URL)
 					if err != nil {
 						result.Error = "Failed to download: " + err.Error()
 						results[idx] = result

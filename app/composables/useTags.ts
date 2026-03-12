@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useApi, type ApiTag } from './useApi'
 
 export interface Tag {
@@ -8,6 +8,7 @@ export interface Tag {
 }
 
 const tags = ref<Tag[]>([])
+const tagsMap = computed(() => new Map(tags.value.map(t => [t.id, t])))
 const loading = ref(false)
 const initialized = ref(false)
 
@@ -85,7 +86,7 @@ export const useTags = () => {
         }
     }
 
-    const getTagById = (id: string) => tags.value.find(t => t.id === id)
+    const getTagById = (id: string) => tagsMap.value.get(id)
 
     // Initialize on first use
     if (!initialized.value && !loading.value) {

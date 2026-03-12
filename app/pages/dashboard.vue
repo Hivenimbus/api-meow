@@ -476,7 +476,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useToast } from '~/composables/useToast'
 import { useTags } from '~/composables/useTags'
 import { useApi } from '~/composables/useApi'
@@ -535,6 +535,8 @@ const instances = ref<Instance[]>([])
 onMounted(async () => {
   await fetchInstances()
 })
+
+onUnmounted(() => stopPolling())
 
 const fetchInstances = async () => {
   loading.value = true
@@ -815,7 +817,7 @@ const startPolling = (instanceName: string) => {
     } catch (e) {
       console.error('Error polling status:', e)
     }
-  }, 2000)
+  }, 3000)
 }
 
 const stopPolling = () => {

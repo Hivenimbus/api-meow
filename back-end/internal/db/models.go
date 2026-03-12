@@ -5,8 +5,8 @@ import "time"
 type Instance struct {
 	ID              string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
 	Name            string    `gorm:"uniqueIndex;not null"`
-	Status          string    `gorm:"not null;default:'disconnected'"`
-	PhoneNumber     *string   `gorm:"type:text"`
+	Status          string    `gorm:"not null;default:'disconnected';index"`
+	PhoneNumber     *string   `gorm:"type:text;index"`
 	TagID           *string   `gorm:"type:text"`
 	IgnoreGroups    *bool     `gorm:"default:true"`
 	WebhookUrl      *string   `gorm:"type:text"`

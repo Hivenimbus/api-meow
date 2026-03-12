@@ -6,7 +6,8 @@
       "Bash(go mod:*)",
       "Bash(go build:*)",
       "Bash(go env:*)",
-      "Bash(powershell.exe:*)"
+      "Bash(powershell.exe:*)",
+      "Bash(wc -l \"C:\\\\Users\\\\jpcb2\\\\OneDrive\\\\Documentos\\\\GitHub\\\\api-meow\\\\app\\\\components\"/*.vue)"
     ]
   }
 }
