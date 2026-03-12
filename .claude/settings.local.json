@@ -9,7 +9,8 @@
       "Bash(powershell.exe:*)",
       "Bash(wc -l \"C:\\\\Users\\\\jpcb2\\\\OneDrive\\\\Documentos\\\\GitHub\\\\api-meow\\\\app\\\\components\"/*.vue)",
       "Bash(grep -r \"whatsapp\\\\|wa-status\\\\|QR\\\\|Conectar\" \"C:\\\\Users\\\\jpcb2\\\\OneDrive\\\\Documentos\\\\GitHub\\\\disparos-meow/app\" --include=\"*.vue\" --include=\"*.ts\" 2>/dev/null | head -20)",
-      "Bash(grep -r \"localStorage\\\\|sessionStorage\\\\|persist\\\\|cache\" \"C:\\\\Users\\\\jpcb2\\\\OneDrive\\\\Documentos\\\\GitHub\\\\disparos-meow\\\\app\" --include=\"*.ts\" --include=\"*.vue\" --include=\"*.js\" 2>/dev/null | head -30)"
+      "Bash(grep -r \"localStorage\\\\|sessionStorage\\\\|persist\\\\|cache\" \"C:\\\\Users\\\\jpcb2\\\\OneDrive\\\\Documentos\\\\GitHub\\\\disparos-meow\\\\app\" --include=\"*.ts\" --include=\"*.vue\" --include=\"*.js\" 2>/dev/null | head -30)",
+      "Bash(pushd \"C:\\\\Users\\\\jpcb2\\\\OneDrive\\\\Documentos\\\\GitHub\\\\disparos-meow\\\\backend\" && go build ./... 2>&1; popd)"
     ]
   }
 }

@@ -191,6 +191,18 @@ func main() {
 		if err := gormDB.WithContext(c.Context()).Order("created_at desc").Find(&instances).Error; err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
+		// Enrich with live status from waManager to avoid stale DB values
+		if waManager != nil {
+			for i := range instances {
+				liveStatus, livePhone, _ := waManager.GetStatus(instances[i].Name)
+				if liveStatus != instances[i].Status {
+					instances[i].Status = liveStatus
+				}
+				if livePhone != "" && (instances[i].PhoneNumber == nil || *instances[i].PhoneNumber != livePhone) {
+					instances[i].PhoneNumber = &livePhone
+				}
+			}
+		}
 		return c.JSON(formatInstances(instances))
 	})
 
@@ -298,6 +310,23 @@ func main() {
 		}
 		if err := gormDB.WithContext(c.Context()).Model(&db.Instance{}).Where("name = ?", name).Updates(updates).Error; err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		// Sync settings to the in-memory client immediately (if connected)
+		if waManager != nil && waManager.HasClient(name) {
+			if client, err := waManager.GetClient(name); err == nil {
+				webhookURL := ""
+				if body.WebhookUrl != nil {
+					webhookURL = *body.WebhookUrl
+				}
+				client.SetWebhook(webhookURL)
+				client.SetIgnoreGroups(body.IgnoreGroups)
+				if body.ProxyEnabled && body.ProxyUrl != nil {
+					_ = client.SetProxy(*body.ProxyUrl)
+				} else {
+					_ = client.SetProxy("")
+				}
+			}
 		}
 
 		var instance db.Instance
@@ -526,6 +555,44 @@ func main() {
 		})
 
 		return c.JSON(fiber.Map{"message": "Disconnected successfully"})
+	})
+
+	// Test webhook endpoint — sends a test event to the configured webhook URL
+	api.Post("/instances/:name/test-webhook", func(c *fiber.Ctx) error {
+		if waManager == nil {
+			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
+		}
+
+		name := c.Params("name")
+
+		// Resolve webhook URL: prefer in-memory client, fall back to DB
+		webhookURL := ""
+		if waManager.HasClient(name) {
+			if client, err := waManager.GetClient(name); err == nil {
+				webhookURL = client.GetWebhookURL()
+			}
+		}
+		if webhookURL == "" {
+			var instance db.Instance
+			if err := gormDB.WithContext(c.Context()).Where("name = ?", name).First(&instance).Error; err != nil {
+				return c.Status(404).JSON(fiber.Map{"error": "Instance not found"})
+			}
+			if instance.WebhookUrl != nil {
+				webhookURL = *instance.WebhookUrl
+			}
+		}
+		if webhookURL == "" {
+			return c.Status(400).JSON(fiber.Map{"error": "No webhook URL configured for this instance"})
+		}
+
+		whatsapp.GetWebhookSender().SendEventAsync(webhookURL, whatsapp.WebhookEvent{
+			Event:     "test",
+			Instance:  name,
+			Timestamp: time.Now().Format(time.RFC3339),
+			Data:      map[string]string{"message": "Webhook test from API Meow"},
+		})
+
+		return c.JSON(fiber.Map{"message": "Test event sent", "webhookUrl": webhookURL})
 	})
 
 	// Set presence endpoint

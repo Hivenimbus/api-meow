@@ -65,6 +65,12 @@ func NewInstanceManager(dbURL string, db *gorm.DB) (*InstanceManager, error) {
 		if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_chat_jids_instance ON chat_jids (instance_jid)`).Error; err != nil {
 			log.Warnf("Failed to create chat_jids index: %v", err)
 		}
+		if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_msg_secrets_our_jid ON whatsmeow_message_secrets(our_jid)`).Error; err != nil {
+			log.Warnf("Failed to create msg_secrets index: %v", err)
+		}
+		if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_chat_settings_our_jid ON whatsmeow_chat_settings(our_jid)`).Error; err != nil {
+			log.Warnf("Failed to create chat_settings index: %v", err)
+		}
 	}
 
 	log.Infof("WhatsApp store initialized successfully")

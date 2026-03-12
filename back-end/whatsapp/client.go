@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +17,8 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
+
+	db "api-meow/internal/db"
 )
 
 // WAClient wraps a whatsmeow client with additional functionality
@@ -29,8 +32,14 @@ type WAClient struct {
 	webhookURL   string
 	ignoreGroups bool
 	connectedAt          time.Time // Track when client connected to filter offline messages
+	pairedAt             time.Time // Track QR pairing time to suppress brief disconnect during session setup
 	historySyncProgress  int32     // atomic: 0-100, updated by HistorySync events
 	mu                   sync.RWMutex
+
+	// Contacts cache — invalidated by HistorySync events and new Connect() calls
+	contactsCache      []ContactInfo
+	contactsCacheAt    time.Time
+	contactsCacheDirty bool
 
 	// Auto-reconnect
 	reconnectFn   func()
@@ -109,8 +118,12 @@ func (w *WAClient) Connect(ctx context.Context) error {
 	w.status = "connecting"
 	w.mu.Unlock()
 
-	// Reset history sync progress for new connection
+	// Reset history sync progress and contacts cache for new connection
 	atomic.StoreInt32(&w.historySyncProgress, 0)
+	w.mu.Lock()
+	w.contactsCache = nil
+	w.contactsCacheDirty = false
+	w.mu.Unlock()
 
 	// Reset channels for fresh connection
 	w.resetChannels()
@@ -120,6 +133,9 @@ func (w *WAClient) Connect(ctx context.Context) error {
 		// Already registered, just connect
 		err := w.client.Connect()
 		if err != nil {
+			if strings.Contains(err.Error(), "websocket is already connected") {
+				return nil // socket already open from a concurrent connect — treat as success
+			}
 			w.mu.Lock()
 			w.status = "disconnected"
 			w.mu.Unlock()
@@ -132,6 +148,9 @@ func (w *WAClient) Connect(ctx context.Context) error {
 	qrChan, _ := w.client.GetQRChannel(ctx)
 	err := w.client.Connect()
 	if err != nil {
+		if strings.Contains(err.Error(), "websocket is already connected") {
+			return nil // socket already open from a concurrent connect — treat as success
+		}
 		w.mu.Lock()
 		w.status = "disconnected"
 		w.mu.Unlock()
@@ -213,6 +232,7 @@ func (w *WAClient) eventHandler(evt interface{}) {
 		w.mu.Lock()
 		w.status = "connected"
 		w.connectedAt = time.Now() // Track connection time to filter offline messages
+		w.pairedAt = time.Time{}   // Clear pairing flag — fully connected now
 		if w.client.Store.ID != nil {
 			w.phone = w.client.Store.ID.User
 		}
@@ -242,12 +262,26 @@ func (w *WAClient) eventHandler(evt interface{}) {
 
 	case *events.Disconnected:
 		w.mu.Lock()
+		// Ignore brief disconnect that whatsmeow fires between PairSuccess and Connected
+		// during QR pairing session establishment (typically lasts < 5 seconds).
+		pairedAt := w.pairedAt
+		if !pairedAt.IsZero() && time.Since(pairedAt) < 15*time.Second {
+			w.mu.Unlock()
+			return
+		}
 		w.status = "disconnected"
 		w.qrCode = ""
 		webhookURL := w.webhookURL
 		shouldReconnect := w.autoReconnect
 		reconnectFn := w.reconnectFn
 		w.mu.Unlock()
+
+		// Persist disconnected status to DB
+		if w.db != nil {
+			w.db.Model(&db.Instance{}).Where("name = ?", w.instanceID).Updates(map[string]interface{}{
+				"status": "disconnected",
+			})
+		}
 
 		// Send webhook event
 		if webhookURL != "" {
@@ -274,6 +308,14 @@ func (w *WAClient) eventHandler(evt interface{}) {
 		webhookURL := w.webhookURL
 		w.mu.Unlock()
 
+		// Persist logged out status to DB and clear phone number
+		if w.db != nil {
+			w.db.Model(&db.Instance{}).Where("name = ?", w.instanceID).Updates(map[string]interface{}{
+				"status":       "disconnected",
+				"phone_number": nil,
+			})
+		}
+
 		// Send webhook event
 		if webhookURL != "" {
 			GetWebhookSender().SendEventAsync(webhookURL, WebhookEvent{
@@ -292,6 +334,7 @@ func (w *WAClient) eventHandler(evt interface{}) {
 		w.status = "connected"
 		w.phone = v.ID.User
 		w.qrCode = ""
+		w.pairedAt = time.Now() // Mark pairing time to suppress brief disconnect during session setup
 		w.mu.Unlock()
 
 	case *events.StreamError:
@@ -314,8 +357,12 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 	connectedAt := w.connectedAt
 	w.mu.RUnlock()
 
+	log.Printf("[Webhook] Message received for instance %s: from=%s type=%s webhookURL=%q",
+		w.instanceID, msg.Info.Sender.User, msg.Info.Chat.Server, webhookURL)
+
 	// Skip if no webhook configured
 	if webhookURL == "" {
+		log.Printf("[Webhook] Skipping: no webhook URL configured for instance %s", w.instanceID)
 		return
 	}
 
@@ -324,9 +371,12 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 		return
 	}
 
-	// Ignore offline/historical messages: only process messages received after connection
-	// This prevents the webhook from receiving messages that were pending while the server was offline
-	if !connectedAt.IsZero() && msg.Info.Timestamp.Before(connectedAt) {
+	// Ignore offline/historical messages: only process messages received after connection.
+	// Use whole-second precision for connectedAt to avoid filtering messages sent in the
+	// same second as the connection (WhatsApp timestamps have 1-second resolution).
+	if !connectedAt.IsZero() && msg.Info.Timestamp.Before(connectedAt.Truncate(time.Second)) {
+		log.Printf("[Webhook] Skipping offline message for instance %s: msg_ts=%v connected_at=%v",
+			w.instanceID, msg.Info.Timestamp, connectedAt)
 		return
 	}
 
@@ -516,15 +566,18 @@ func (w *WAClient) GetStatus() (string, string) {
 	w.mu.RLock()
 	status := w.status
 	phone := w.phone
+	pairedAt := w.pairedAt
 	w.mu.RUnlock()
 
-	// If cached status says connected, validate against the actual socket state
+	// If cached status says connected but socket is down, check if we're in the
+	// brief reconnect window after QR pairing (whatsmeow disconnects and reconnects
+	// between PairSuccess and Connected). During this window, report "connecting"
+	// instead of "disconnected" to prevent false "QR Code expired" errors.
+	// Do NOT mutate w.status here — state changes must only come from event handlers.
 	if status == "connected" && !w.client.IsConnected() {
-		w.mu.Lock()
-		if w.status == "connected" {
-			w.status = "disconnected"
+		if !pairedAt.IsZero() && time.Since(pairedAt) < 15*time.Second {
+			return "connecting", phone
 		}
-		w.mu.Unlock()
 		return "disconnected", phone
 	}
 
@@ -945,8 +998,11 @@ func (w *WAClient) processHistorySync(v *events.HistorySync) {
 		}
 	}
 
-	// Update history sync progress (0-100)
+	// Update history sync progress (0-100) and mark contacts cache as dirty
 	atomic.StoreInt32(&w.historySyncProgress, int32(v.Data.GetProgress()))
+	w.mu.Lock()
+	w.contactsCacheDirty = true
+	w.mu.Unlock()
 }
 
 // saveInteractionJID saves a contact JID from real-time message interactions
@@ -992,7 +1048,18 @@ func (w *WAClient) resolveToPhone(ctx context.Context, jidStr string) (phone str
 
 // FetchContacts retrieves contacts from 5 sources, deduplicates, and applies anti-spam filters.
 // Handles modern WhatsApp LID (Linked Identity) JIDs via whatsmeow_lid_map.
+// Results are cached in memory for up to 5 minutes; cache is invalidated by HistorySync events.
 func (w *WAClient) FetchContacts(ctx context.Context) ([]ContactInfo, error) {
+	// Serve from cache if fresh and not dirty
+	w.mu.RLock()
+	if !w.contactsCacheDirty && len(w.contactsCache) > 0 && time.Since(w.contactsCacheAt) < 5*time.Minute {
+		result := make([]ContactInfo, len(w.contactsCache))
+		copy(result, w.contactsCache)
+		w.mu.RUnlock()
+		return result, nil
+	}
+	w.mu.RUnlock()
+
 	seen := make(map[string]*ContactInfo) // keyed by phone number
 
 	// Pre-load all LID→PN mappings into in-memory cache in one bulk query.
@@ -1091,7 +1158,8 @@ func (w *WAClient) FetchContacts(ctx context.Context) ([]ContactInfo, error) {
 			WHERE our_jid = ?
 			AND chat_jid NOT LIKE '%@g.us'
 			AND chat_jid NOT LIKE '%@broadcast'
-			AND chat_jid NOT LIKE '%@newsletter'`, ourJID).Scan(&secretRows)
+			AND chat_jid NOT LIKE '%@newsletter'
+			ORDER BY rowid DESC LIMIT 10000`, ourJID).Scan(&secretRows)
 		for _, row := range secretRows {
 			for _, jidStr := range []string{row.ChatJid, row.SenderJid} {
 				if jidStr == "" {
@@ -1135,6 +1203,13 @@ func (w *WAClient) FetchContacts(ctx context.Context) ([]ContactInfo, error) {
 		info.Name = name
 		result = append(result, *info)
 	}
+
+	// Store in cache
+	w.mu.Lock()
+	w.contactsCache = result
+	w.contactsCacheAt = time.Now()
+	w.contactsCacheDirty = false
+	w.mu.Unlock()
 
 	return result, nil
 }
