@@ -338,6 +338,17 @@ func (m *InstanceManager) GetQRCode(instanceID string) (string, error) {
 	return client.GetQRCode(), nil
 }
 
+// GetSyncProgress returns the history sync progress (0-100) for an instance
+func (m *InstanceManager) GetSyncProgress(instanceID string) int {
+	m.mu.RLock()
+	client, exists := m.clients[instanceID]
+	m.mu.RUnlock()
+	if !exists {
+		return 0
+	}
+	return client.GetSyncProgress()
+}
+
 // HasClient returns whether an instance client is loaded in memory
 func (m *InstanceManager) HasClient(instanceID string) bool {
 	m.mu.RLock()

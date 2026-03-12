@@ -28,8 +28,9 @@ type WAClient struct {
 	phone        string
 	webhookURL   string
 	ignoreGroups bool
-	connectedAt  time.Time // Track when client connected to filter offline messages
-	mu           sync.RWMutex
+	connectedAt          time.Time // Track when client connected to filter offline messages
+	historySyncProgress  int32     // atomic: 0-100, updated by HistorySync events
+	mu                   sync.RWMutex
 
 	// Auto-reconnect
 	reconnectFn   func()
@@ -107,6 +108,9 @@ func (w *WAClient) Connect(ctx context.Context) error {
 	w.qrCode = ""
 	w.status = "connecting"
 	w.mu.Unlock()
+
+	// Reset history sync progress for new connection
+	atomic.StoreInt32(&w.historySyncProgress, 0)
 
 	// Reset channels for fresh connection
 	w.resetChannels()
@@ -527,6 +531,11 @@ func (w *WAClient) GetStatus() (string, string) {
 	return status, phone
 }
 
+// GetSyncProgress returns the history sync progress (0-100). 100 means sync is complete.
+func (w *WAClient) GetSyncProgress() int {
+	return int(atomic.LoadInt32(&w.historySyncProgress))
+}
+
 // IsConnected returns whether the client is connected
 func (w *WAClient) IsConnected() bool {
 	return w.client.IsConnected()
@@ -935,6 +944,9 @@ func (w *WAClient) processHistorySync(v *events.HistorySync) {
 				ourJID, msgJID, "")
 		}
 	}
+
+	// Update history sync progress (0-100)
+	atomic.StoreInt32(&w.historySyncProgress, int32(v.Data.GetProgress()))
 }
 
 // saveInteractionJID saves a contact JID from real-time message interactions

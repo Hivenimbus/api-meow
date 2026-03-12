@@ -488,9 +488,11 @@ func main() {
 			}
 		}
 
+		syncProgress := waManager.GetSyncProgress(name)
 		return c.JSON(fiber.Map{
-			"status": status,
-			"phone":  phone,
+			"status":        status,
+			"phone":         phone,
+			"sync_progress": syncProgress,
 		})
 	})
 
