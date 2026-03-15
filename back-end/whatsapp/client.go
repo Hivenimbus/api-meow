@@ -371,11 +371,6 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 		return
 	}
 
-	// Ignore messages sent by this device (fromMe)
-	if msg.Info.IsFromMe {
-		return
-	}
-
 	// Ignore offline/historical messages: only process messages received after connection.
 	// Use whole-second precision for connectedAt to avoid filtering messages sent in the
 	// same second as the connection (WhatsApp timestamps have 1-second resolution).
@@ -403,6 +398,7 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 		From:      from,
 		MessageID: msg.Info.ID,
 		IsGroup:   isGroup,
+		IsFromMe:  msg.Info.IsFromMe,
 		Timestamp: msg.Info.Timestamp.Unix(),
 	}
 

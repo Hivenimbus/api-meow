@@ -33,6 +33,7 @@ type MessageData struct {
 	FileName    string `json:"fileName,omitempty"`
 	MimeType    string `json:"mimeType,omitempty"`
 	IsGroup     bool   `json:"isGroup"`
+	IsFromMe    bool   `json:"isFromMe"`
 	GroupID     string `json:"groupId,omitempty"`
 	GroupName   string `json:"groupName,omitempty"`
 	Timestamp   int64  `json:"timestamp"`
