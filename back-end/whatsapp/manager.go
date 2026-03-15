@@ -491,6 +491,31 @@ func (m *InstanceManager) ConnectWithPhone(instanceID, phoneNumber string) (*WAC
 	if err != nil {
 		return nil, err
 	}
+
+	// Load settings from DB (webhook URL, ignore groups, proxy)
+	if m.db != nil {
+		var inst struct {
+			WebhookUrl   *string
+			IgnoreGroups *bool
+			ProxyEnabled *bool
+			ProxyUrl     *string
+		}
+		if err := m.db.Table("instances").
+			Select("webhook_url, ignore_groups, proxy_enabled, proxy_url").
+			Where("name = ?", instanceID).
+			Scan(&inst).Error; err == nil {
+			if inst.WebhookUrl != nil && *inst.WebhookUrl != "" {
+				client.SetWebhook(*inst.WebhookUrl)
+			}
+			if inst.IgnoreGroups != nil {
+				client.SetIgnoreGroups(*inst.IgnoreGroups)
+			}
+			if inst.ProxyEnabled != nil && *inst.ProxyEnabled && inst.ProxyUrl != nil {
+				_ = client.SetProxy(*inst.ProxyUrl)
+			}
+		}
+	}
+
 	if err := client.Connect(m.ctx); err != nil {
 		return nil, err
 	}

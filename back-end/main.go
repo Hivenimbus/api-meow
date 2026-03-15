@@ -503,6 +503,20 @@ func main() {
 				"status":       "connected",
 				"phone_number": phone,
 			})
+			// Ensure in-memory client has the webhook URL (self-healing after restart/reconnect)
+			if waManager.HasClient(name) {
+				if client, err := waManager.GetClient(name); err == nil {
+					if client.GetWebhookURL() == "" {
+						var inst db.Instance
+						if gormDB.WithContext(c.Context()).Where("name = ?", name).First(&inst).Error == nil {
+							if inst.WebhookUrl != nil && *inst.WebhookUrl != "" {
+								client.SetWebhook(*inst.WebhookUrl)
+								log.Printf("[wa-status] Webhook URL restored for instance %s", name)
+							}
+						}
+					}
+				}
+			}
 		} else if status == "disconnected" && phone == "" && !waManager.HasClient(name) {
 			// Client not in memory (e.g., server restart) — check if there's a saved session to auto-reconnect
 			var instance db.Instance
