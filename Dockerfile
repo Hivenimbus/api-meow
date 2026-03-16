@@ -49,8 +49,8 @@ FROM node:22-alpine AS production
 
 WORKDIR /app
 
-# Install ca-certificates for HTTPS and postgresql-client for migrations
-RUN apk add --no-cache ca-certificates postgresql-client
+# Install ca-certificates for HTTPS, postgresql-client for migrations, ffmpeg for audio conversion
+RUN apk add --no-cache ca-certificates postgresql-client ffmpeg
 
 # Copy frontend build output
 COPY --from=frontend-builder /app/.output ./.output

@@ -1,10 +1,13 @@
 package whatsapp
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"log"
+	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,6 +23,92 @@ import (
 
 	db "api-meow/internal/db"
 )
+
+// convertToOggOpus converts audio data to ogg/opus format using ffmpeg.
+// Returns the converted data and true on success; falls back to original data on failure.
+func convertToOggOpus(inputData []byte, inputMime string) ([]byte, bool) {
+	// Already OGG — no conversion needed
+	if strings.Contains(inputMime, "ogg") {
+		return inputData, true
+	}
+
+	cmd := exec.Command("ffmpeg",
+		"-y",
+		"-i", "pipe:0",       // read from stdin
+		"-vn",                 // no video
+		"-c:a", "libopus",
+		"-b:a", "32k",
+		"-ar", "48000",
+		"-ac", "1",
+		"-f", "ogg",
+		"pipe:1",              // write to stdout
+	)
+	cmd.Stdin = bytes.NewReader(inputData)
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
+
+	if err := cmd.Run(); err != nil {
+		log.Printf("[Audio] ffmpeg conversion failed: %v — stderr: %s", err, errBuf.String())
+		return inputData, false
+	}
+
+	converted := out.Bytes()
+	if len(converted) == 0 {
+		log.Printf("[Audio] ffmpeg produced empty output")
+		return inputData, false
+	}
+
+	log.Printf("[Audio] Converted %d bytes (%s) → %d bytes (ogg/opus)", len(inputData), inputMime, len(converted))
+	return converted, true
+}
+
+// calcOggDurationSeconds extracts the total duration from an OGG/Opus stream.
+// Scans OGG pages for the highest granule position; Opus uses 48000 Hz sample rate.
+func calcOggDurationSeconds(data []byte) uint32 {
+	magic := []byte("OggS")
+	var maxGranule int64
+
+	for i := 0; i < len(data)-27; {
+		idx := bytes.Index(data[i:], magic)
+		if idx < 0 {
+			break
+		}
+		pageStart := i + idx
+
+		if pageStart+27 > len(data) {
+			break
+		}
+
+		// Granule position is a little-endian int64 at offset 6 within the page header
+		granule := int64(binary.LittleEndian.Uint64(data[pageStart+6 : pageStart+14]))
+		if granule > 0 && granule != -1 && granule > maxGranule {
+			maxGranule = granule
+		}
+
+		// Advance past this page: header (27 bytes) + segment table + segment data
+		segCount := int(data[pageStart+26])
+		headerEnd := pageStart + 27 + segCount
+		if headerEnd > len(data) {
+			break
+		}
+		var dataSize int
+		for j := 0; j < segCount; j++ {
+			dataSize += int(data[pageStart+27+j])
+		}
+		i = headerEnd + dataSize
+	}
+
+	if maxGranule > 0 {
+		secs := uint32(maxGranule / 48000)
+		if secs == 0 {
+			secs = 1
+		}
+		return secs
+	}
+	return 1
+}
 
 // WAClient wraps a whatsmeow client with additional functionality
 type WAClient struct {
@@ -885,10 +974,31 @@ func (w *WAClient) SendAudioMessage(ctx context.Context, recipient string, audio
 		w.client.SendChatPresence(ctx, recipientJID, types.ChatPresencePaused, types.ChatPresenceMediaAudio)
 	}
 
+	// Convert to ogg/opus if needed (WhatsApp PTT requires ogg/opus)
+	uploadData := audioData
+	uploadMime := mimeType
+	if ptt || !strings.Contains(mimeType, "ogg") {
+		if converted, ok := convertToOggOpus(audioData, mimeType); ok {
+			uploadData = converted
+			uploadMime = "audio/ogg; codecs=opus"
+			ptt = true // force PTT for ogg/opus
+		} else if ptt {
+			// ffmpeg not available; can't send PTT with wrong format — send as regular audio
+			log.Printf("[Audio] Sending as regular audio (non-PTT) due to conversion failure")
+			ptt = false
+		}
+	}
+
 	// Upload audio
-	uploadResp, err := w.client.Upload(ctx, audioData, whatsmeow.MediaAudio)
+	uploadResp, err := w.client.Upload(ctx, uploadData, whatsmeow.MediaAudio)
 	if err != nil {
 		return nil, fmt.Errorf("failed to upload audio: %w", err)
+	}
+
+	// Calculate duration (Seconds field is required for PTT display)
+	var seconds uint32 = 1
+	if strings.Contains(uploadMime, "ogg") {
+		seconds = calcOggDurationSeconds(uploadData)
 	}
 
 	// Create audio message
@@ -897,11 +1007,12 @@ func (w *WAClient) SendAudioMessage(ctx context.Context, recipient string, audio
 			URL:           proto.String(uploadResp.URL),
 			DirectPath:    proto.String(uploadResp.DirectPath),
 			MediaKey:      uploadResp.MediaKey,
-			Mimetype:      proto.String(mimeType),
+			Mimetype:      proto.String(uploadMime),
 			FileEncSHA256: uploadResp.FileEncSHA256,
 			FileSHA256:    uploadResp.FileSHA256,
-			FileLength:    proto.Uint64(uint64(len(audioData))),
+			FileLength:    proto.Uint64(uint64(len(uploadData))),
 			PTT:           proto.Bool(ptt),
+			Seconds:       proto.Uint32(seconds),
 		},
 	}
 
