@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -25,6 +26,8 @@ import (
 )
 
 // convertToOggOpus converts audio data to ogg/opus format using ffmpeg.
+// Uses temp files instead of stdin/stdout pipes so ffmpeg can seek and detect
+// the WebM/Matroska container format correctly.
 // Returns the converted data and true on success; falls back to original data on failure.
 func convertToOggOpus(inputData []byte, inputMime string) ([]byte, bool) {
 	// Already OGG — no conversion needed
@@ -32,21 +35,50 @@ func convertToOggOpus(inputData []byte, inputMime string) ([]byte, bool) {
 		return inputData, true
 	}
 
+	// Determine input extension from MIME type so ffmpeg can detect the container
+	ext := "webm"
+	if strings.Contains(inputMime, "mp4") || strings.Contains(inputMime, "mpeg") {
+		ext = "mp4"
+	} else if strings.Contains(inputMime, "wav") {
+		ext = "wav"
+	} else if strings.Contains(inputMime, "mp3") {
+		ext = "mp3"
+	}
+
+	tmpIn, err := os.CreateTemp("", "audio_in_*."+ext)
+	if err != nil {
+		log.Printf("[Audio] Failed to create temp input file: %v", err)
+		return inputData, false
+	}
+	defer os.Remove(tmpIn.Name())
+
+	if _, err := tmpIn.Write(inputData); err != nil {
+		tmpIn.Close()
+		log.Printf("[Audio] Failed to write temp input file: %v", err)
+		return inputData, false
+	}
+	tmpIn.Close()
+
+	tmpOut, err := os.CreateTemp("", "audio_out_*.ogg")
+	if err != nil {
+		log.Printf("[Audio] Failed to create temp output file: %v", err)
+		return inputData, false
+	}
+	outName := tmpOut.Name()
+	tmpOut.Close()
+	defer os.Remove(outName)
+
+	var errBuf bytes.Buffer
 	cmd := exec.Command("ffmpeg",
 		"-y",
-		"-i", "pipe:0",       // read from stdin
-		"-vn",                 // no video
+		"-i", tmpIn.Name(),
+		"-vn",
 		"-c:a", "libopus",
 		"-b:a", "32k",
 		"-ar", "48000",
 		"-ac", "1",
-		"-f", "ogg",
-		"pipe:1",              // write to stdout
+		outName,
 	)
-	cmd.Stdin = bytes.NewReader(inputData)
-	var out bytes.Buffer
-	var errBuf bytes.Buffer
-	cmd.Stdout = &out
 	cmd.Stderr = &errBuf
 
 	if err := cmd.Run(); err != nil {
@@ -54,9 +86,9 @@ func convertToOggOpus(inputData []byte, inputMime string) ([]byte, bool) {
 		return inputData, false
 	}
 
-	converted := out.Bytes()
-	if len(converted) == 0 {
-		log.Printf("[Audio] ffmpeg produced empty output")
+	converted, err := os.ReadFile(outName)
+	if err != nil || len(converted) == 0 {
+		log.Printf("[Audio] Failed to read ffmpeg output: %v", err)
 		return inputData, false
 	}
 
