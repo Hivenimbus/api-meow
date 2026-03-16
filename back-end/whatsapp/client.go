@@ -29,10 +29,12 @@ func isOggOpus(mimeType string) bool {
 }
 
 // calcOggDurationSeconds extracts the total duration from an OGG/Opus stream.
-// Scans OGG pages for the highest granule position; Opus uses 48000 Hz sample rate.
+// Reads the pre_skip from the OpusHead (first audio page payload) and subtracts
+// it from the max granule position. Opus uses 48000 Hz sample rate.
 func calcOggDurationSeconds(data []byte) uint32 {
 	magic := []byte("OggS")
 	var maxGranule int64
+	var preSkip int64
 
 	for i := 0; i < len(data)-27; {
 		idx := bytes.Index(data[i:], magic)
@@ -45,13 +47,9 @@ func calcOggDurationSeconds(data []byte) uint32 {
 			break
 		}
 
-		// Granule position is a little-endian int64 at offset 6 within the page header
+		headerType := data[pageStart+5]
 		granule := int64(binary.LittleEndian.Uint64(data[pageStart+6 : pageStart+14]))
-		if granule > 0 && granule != -1 && granule > maxGranule {
-			maxGranule = granule
-		}
 
-		// Advance past this page: header (27 bytes) + segment table + segment data
 		segCount := int(data[pageStart+26])
 		headerEnd := pageStart + 27 + segCount
 		if headerEnd > len(data) {
@@ -61,11 +59,26 @@ func calcOggDurationSeconds(data []byte) uint32 {
 		for j := 0; j < segCount; j++ {
 			dataSize += int(data[pageStart+27+j])
 		}
+		payloadStart := headerEnd
+		payloadEnd := payloadStart + dataSize
+
+		// BOS page: if payload starts with "OpusHead", read pre_skip (bytes 10-11 of payload)
+		if headerType&0x02 != 0 && payloadEnd <= len(data) && payloadEnd-payloadStart >= 12 {
+			payload := data[payloadStart:payloadEnd]
+			if len(payload) >= 12 && string(payload[:8]) == "OpusHead" {
+				preSkip = int64(binary.LittleEndian.Uint16(payload[10:12]))
+			}
+		}
+
+		if granule > 0 && granule != -1 && granule > maxGranule {
+			maxGranule = granule
+		}
+
 		i = headerEnd + dataSize
 	}
 
-	if maxGranule > 0 {
-		secs := uint32(maxGranule / 48000)
+	if maxGranule > preSkip {
+		secs := uint32((maxGranule - preSkip) / 48000)
 		if secs == 0 {
 			secs = 1
 		}
