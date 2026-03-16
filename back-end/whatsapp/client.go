@@ -7,8 +7,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
-	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,75 +23,9 @@ import (
 	db "api-meow/internal/db"
 )
 
-// convertToOggOpus converts audio data to ogg/opus format using ffmpeg.
-// Uses temp files instead of stdin/stdout pipes so ffmpeg can seek and detect
-// the WebM/Matroska container format correctly.
-// Returns the converted data and true on success; falls back to original data on failure.
-func convertToOggOpus(inputData []byte, inputMime string) ([]byte, bool) {
-	// Already OGG — no conversion needed
-	if strings.Contains(inputMime, "ogg") {
-		return inputData, true
-	}
-
-	// Determine input extension from MIME type so ffmpeg can detect the container
-	ext := "webm"
-	if strings.Contains(inputMime, "mp4") || strings.Contains(inputMime, "mpeg") {
-		ext = "mp4"
-	} else if strings.Contains(inputMime, "wav") {
-		ext = "wav"
-	} else if strings.Contains(inputMime, "mp3") {
-		ext = "mp3"
-	}
-
-	tmpIn, err := os.CreateTemp("", "audio_in_*."+ext)
-	if err != nil {
-		log.Printf("[Audio] Failed to create temp input file: %v", err)
-		return inputData, false
-	}
-	defer os.Remove(tmpIn.Name())
-
-	if _, err := tmpIn.Write(inputData); err != nil {
-		tmpIn.Close()
-		log.Printf("[Audio] Failed to write temp input file: %v", err)
-		return inputData, false
-	}
-	tmpIn.Close()
-
-	tmpOut, err := os.CreateTemp("", "audio_out_*.ogg")
-	if err != nil {
-		log.Printf("[Audio] Failed to create temp output file: %v", err)
-		return inputData, false
-	}
-	outName := tmpOut.Name()
-	tmpOut.Close()
-	defer os.Remove(outName)
-
-	var errBuf bytes.Buffer
-	cmd := exec.Command("ffmpeg",
-		"-y",
-		"-i", tmpIn.Name(),
-		"-vn",
-		"-c:a", "libopus",
-		"-b:a", "32k",
-		"-ar", "48000",
-		"-ac", "1",
-		outName,
-	)
-	cmd.Stderr = &errBuf
-
-	if err := cmd.Run(); err != nil {
-		log.Printf("[Audio] ffmpeg conversion failed: %v — stderr: %s", err, errBuf.String())
-		return inputData, false
-	}
-
-	converted, err := os.ReadFile(outName)
-	if err != nil || len(converted) == 0 {
-		log.Printf("[Audio] Failed to read ffmpeg output: %v", err)
-		return inputData, false
-	}
-
-	log.Printf("[Audio] Converted %d bytes (%s) → %d bytes (ogg/opus)", len(inputData), inputMime, len(converted))
-	return converted, true
+// isOggOpus reports whether the MIME type is OGG/Opus (required for WhatsApp PTT).
+func isOggOpus(mimeType string) bool {
+	return strings.Contains(mimeType, "ogg")
 }
 
 // calcOggDurationSeconds extracts the total duration from an OGG/Opus stream.
@@ -1006,19 +938,17 @@ func (w *WAClient) SendAudioMessage(ctx context.Context, recipient string, audio
 		w.client.SendChatPresence(ctx, recipientJID, types.ChatPresencePaused, types.ChatPresenceMediaAudio)
 	}
 
-	// Convert to ogg/opus if needed (WhatsApp PTT requires ogg/opus)
+	// PTT (voice message) requires ogg/opus. If the audio is already ogg/opus
+	// (converted upstream by the Nuxt server), send as PTT. Otherwise send as
+	// regular audio — no local ffmpeg conversion needed.
 	uploadData := audioData
 	uploadMime := mimeType
-	if ptt || !strings.Contains(mimeType, "ogg") {
-		if converted, ok := convertToOggOpus(audioData, mimeType); ok {
-			uploadData = converted
-			uploadMime = "audio/ogg; codecs=opus"
-			ptt = true // force PTT for ogg/opus
-		} else if ptt {
-			// ffmpeg not available; can't send PTT with wrong format — send as regular audio
-			log.Printf("[Audio] Sending as regular audio (non-PTT) due to conversion failure")
-			ptt = false
-		}
+	if !isOggOpus(mimeType) {
+		// Not ogg/opus — cannot send as PTT; send as regular audio instead
+		log.Printf("[Audio] mimeType %q is not ogg/opus, sending as regular audio (non-PTT)", mimeType)
+		ptt = false
+	} else {
+		ptt = true
 	}
 
 	// Upload audio
