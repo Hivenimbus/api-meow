@@ -46,8 +46,8 @@ FROM node:22-alpine AS production
 
 WORKDIR /app
 
-# Install ca-certificates for HTTPS, postgresql-client for migrations, ffmpeg for audio conversion
-RUN apk add --no-cache ca-certificates postgresql-client ffmpeg
+# Install ca-certificates for HTTPS and postgresql-client for migrations
+RUN apk add --no-cache ca-certificates postgresql-client
 
 # Copy frontend build output
 COPY --from=frontend-builder /app/.output ./.output
@@ -58,30 +58,40 @@ COPY --from=backend-builder /app/api-meow ./api-meow
 # Copy SQL schema for migrations
 COPY back-end/sql/schema/unified_schema.sql ./migrations/schema.sql
 
-# Create a startup script that runs migrations before starting services
+# Create a startup script that runs migrations before starting services.
+# Both processes run in background so the shell (PID 1) can trap SIGTERM and
+# forward it to both — guaranteeing the Go binary gets a clean shutdown signal.
 RUN cat > /app/start.sh << 'EOF'
 #!/bin/sh
 set -e
 
-echo "🚀 Starting API Meow..."
+echo "Starting API Meow..."
 
 # Run database migrations if DATABASE_URL is set
 if [ -n "$DATABASE_URL" ]; then
-    echo "📦 Running database migrations..."
+    echo "Running database migrations..."
     psql "$DATABASE_URL" -f /app/migrations/schema.sql \
-        && echo "✅ Migrations completed successfully!" \
-        || echo "⚠️  Migration warning (tables may already exist, continuing...)"
+        && echo "Migrations completed successfully!" \
+        || echo "Migration warning (tables may already exist, continuing...)"
 else
-    echo "⚠️  DATABASE_URL not set, skipping migrations"
+    echo "DATABASE_URL not set, skipping migrations"
 fi
 
-# Start Go backend in background
-echo "🔧 Starting Go backend on port 8080..."
+# Start Go backend and Nuxt frontend in background, capturing PIDs
+echo "Starting Go backend on port 8080..."
 ./api-meow &
+GO_PID=$!
 
-# Start Nuxt frontend
-echo "🌐 Starting Nuxt frontend on port 3000..."
-node .output/server/index.mjs
+echo "Starting Nuxt frontend on port 3000..."
+node .output/server/index.mjs &
+NODE_PID=$!
+
+# Forward SIGTERM/INT to both processes so the Go binary performs graceful
+# shutdown (closes WhatsApp connections cleanly and preserves session state).
+trap 'echo "Shutdown signal received, stopping services..."; kill -TERM $GO_PID $NODE_PID' TERM INT
+
+# Wait for both processes to exit before the container stops
+wait $GO_PID $NODE_PID
 EOF
 RUN chmod +x /app/start.sh
 
@@ -92,6 +102,11 @@ EXPOSE 3000 8080
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
+
+# Health check uses the /health endpoint exposed by the Go backend.
+# --start-period gives time for migrations + startup before checks begin.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD wget -qO- http://localhost:8080/health || exit 1
 
 # Start both services with migrations
 CMD ["/app/start.sh"]
