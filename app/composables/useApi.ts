@@ -1,8 +1,5 @@
 import { useAuth } from './useAuth'
 
-// Always use relative paths — Nuxt's Nitro proxy forwards /api/** to Go backend
-const getBackendUrl = () => ''
-
 const headers = () => {
     const { getApiKey } = useAuth()
     const apiKey = getApiKey()
@@ -39,11 +36,9 @@ export const useApi = () => {
 
     // Instances
     const fetchInstances = async (): Promise<ApiInstance[]> => {
-        const response = await fetch(`${API_BASE_URL}/instances`, {
+        return $fetch<ApiInstance[]>(`${API_BASE_URL}/instances`, {
             headers: headers()
         })
-        if (!response.ok) throw new Error('Failed to fetch instances')
-        return response.json()
     }
 
     const createInstance = async (data: {
@@ -53,13 +48,11 @@ export const useApi = () => {
         ignoreGroups?: boolean
         receiveMessages?: boolean
     }): Promise<ApiInstance> => {
-        const response = await fetch(`${API_BASE_URL}/instances`, {
+        return $fetch<ApiInstance>(`${API_BASE_URL}/instances`, {
             method: 'POST',
             headers: headers(),
-            body: JSON.stringify(data)
+            body: data
         })
-        if (!response.ok) throw new Error('Failed to create instance')
-        return response.json()
     }
 
     const updateInstanceStatus = async (
@@ -67,13 +60,11 @@ export const useApi = () => {
         status: string,
         phoneNumber?: string
     ): Promise<ApiInstance> => {
-        const response = await fetch(`${API_BASE_URL}/instances/${name}/status`, {
+        return $fetch<ApiInstance>(`${API_BASE_URL}/instances/${name}/status`, {
             method: 'PUT',
             headers: headers(),
-            body: JSON.stringify({ status, phoneNumber })
+            body: { status, phoneNumber }
         })
-        if (!response.ok) throw new Error('Failed to update instance status')
-        return response.json()
     }
 
     const updateInstanceSettings = async (
@@ -87,58 +78,48 @@ export const useApi = () => {
             proxyUrl?: string
         }
     ): Promise<ApiInstance> => {
-        const response = await fetch(`${API_BASE_URL}/instances/${name}/settings`, {
+        return $fetch<ApiInstance>(`${API_BASE_URL}/instances/${name}/settings`, {
             method: 'PUT',
             headers: headers(),
-            body: JSON.stringify(settings)
+            body: settings
         })
-        if (!response.ok) throw new Error('Failed to update instance settings')
-        return response.json()
     }
 
     const deleteInstance = async (name: string): Promise<void> => {
-        const response = await fetch(`${API_BASE_URL}/instances/${name}`, {
+        await $fetch(`${API_BASE_URL}/instances/${name}`, {
             method: 'DELETE',
             headers: headers()
         })
-        if (!response.ok) throw new Error('Failed to delete instance')
     }
 
     // Tags
     const fetchTags = async (): Promise<ApiTag[]> => {
-        const response = await fetch(`${API_BASE_URL}/tags`, {
+        return $fetch<ApiTag[]>(`${API_BASE_URL}/tags`, {
             headers: headers()
         })
-        if (!response.ok) throw new Error('Failed to fetch tags')
-        return response.json()
     }
 
     const createTag = async (name: string, color: string): Promise<ApiTag> => {
-        const response = await fetch(`${API_BASE_URL}/tags`, {
+        return $fetch<ApiTag>(`${API_BASE_URL}/tags`, {
             method: 'POST',
             headers: headers(),
-            body: JSON.stringify({ name, color })
+            body: { name, color }
         })
-        if (!response.ok) throw new Error('Failed to create tag')
-        return response.json()
     }
 
     const updateTag = async (id: string, name: string, color: string): Promise<ApiTag> => {
-        const response = await fetch(`${API_BASE_URL}/tags/${id}`, {
+        return $fetch<ApiTag>(`${API_BASE_URL}/tags/${id}`, {
             method: 'PUT',
             headers: headers(),
-            body: JSON.stringify({ name, color })
+            body: { name, color }
         })
-        if (!response.ok) throw new Error('Failed to update tag')
-        return response.json()
     }
 
     const deleteTag = async (id: string): Promise<void> => {
-        const response = await fetch(`${API_BASE_URL}/tags/${id}`, {
+        await $fetch(`${API_BASE_URL}/tags/${id}`, {
             method: 'DELETE',
             headers: headers()
         })
-        if (!response.ok) throw new Error('Failed to delete tag')
     }
 
     // WhatsApp Connection
@@ -148,15 +129,14 @@ export const useApi = () => {
         phone?: string
         message: string
     }> => {
-        const response = await fetch(`${API_BASE_URL}/instances/${name}/connect`, {
-            method: 'POST',
-            headers: headers()
-        })
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}))
-            throw new Error(errorData.error || 'Failed to initiate connection')
+        try {
+            return await $fetch<{ status: string; qrCode?: string; phone?: string; message: string }>(
+                `${API_BASE_URL}/instances/${name}/connect`,
+                { method: 'POST', headers: headers() }
+            )
+        } catch (err: any) {
+            throw new Error(err?.data?.error || 'Failed to initiate connection')
         }
-        return response.json()
     }
 
     const getQRCode = async (name: string): Promise<{
@@ -164,22 +144,20 @@ export const useApi = () => {
         status: string
         phone?: string
     }> => {
-        const response = await fetch(`${API_BASE_URL}/instances/${name}/qrcode`, {
-            headers: headers()
-        })
-        if (!response.ok) throw new Error('Failed to fetch QR code')
-        return response.json()
+        return $fetch<{ qrCode: string; status: string; phone?: string }>(
+            `${API_BASE_URL}/instances/${name}/qrcode`,
+            { headers: headers() }
+        )
     }
 
     const getWhatsAppStatus = async (name: string): Promise<{
         status: string
         phone?: string
     }> => {
-        const response = await fetch(`${API_BASE_URL}/instances/${name}/wa-status`, {
-            headers: headers()
-        })
-        if (!response.ok) throw new Error('Failed to fetch status')
-        return response.json()
+        return $fetch<{ status: string; phone?: string }>(
+            `${API_BASE_URL}/instances/${name}/wa-status`,
+            { headers: headers() }
+        )
     }
 
     const testProxy = async (proxyUrl: string): Promise<{
@@ -193,21 +171,28 @@ export const useApi = () => {
         waReachable?: boolean
         error?: string
     }> => {
-        const response = await fetch(`${API_BASE_URL}/proxy/test`, {
+        return $fetch<{
+            success: boolean
+            ip?: string
+            country?: string
+            region?: string
+            city?: string
+            isp?: string
+            org?: string
+            waReachable?: boolean
+            error?: string
+        }>(`${API_BASE_URL}/proxy/test`, {
             method: 'POST',
             headers: headers(),
-            body: JSON.stringify({ proxyUrl })
+            body: { proxyUrl }
         })
-        if (!response.ok) throw new Error('Failed to test proxy')
-        return response.json()
     }
 
     const disconnectInstance = async (name: string): Promise<void> => {
-        const response = await fetch(`${API_BASE_URL}/instances/${name}/disconnect`, {
+        await $fetch(`${API_BASE_URL}/instances/${name}/disconnect`, {
             method: 'POST',
             headers: headers()
         })
-        if (!response.ok) throw new Error('Failed to disconnect')
     }
 
     return {
