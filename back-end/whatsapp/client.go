@@ -522,17 +522,6 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 		from = msg.Info.Sender.User
 	}
 
-	// If the sender uses LID addressing, SenderAlt contains the real phone number JID.
-	// When Chat.Server == "lid", whatsmeow sets SenderAlt to the "sender_pn" attribute,
-	// which is the actual phone number JID (@s.whatsapp.net).
-	if !msg.Info.SenderAlt.IsEmpty() && msg.Info.SenderAlt.Server == types.DefaultUserServer {
-		from = msg.Info.SenderAlt.User
-	} else if msg.Info.SenderAlt.IsEmpty() && (msg.Info.Chat.Server == types.HiddenUserServer || msg.Info.Chat.Server == types.HostedLIDServer) {
-		// SenderAlt is empty and the chat is a LID JID — WhatsApp didn't include sender_pn.
-		// Use the full LID JID string so the client can use LID addressing to send replies.
-		from = msg.Info.Chat.String() // e.g. "237559137448078@lid"
-	}
-
 	// Build message data
 	msgData := MessageData{
 		From:      from,
@@ -1332,7 +1321,7 @@ func (w *WAClient) FetchContacts(ctx context.Context) ([]ContactInfo, error) {
 			AND chat_jid NOT LIKE '%@g.us'
 			AND chat_jid NOT LIKE '%@broadcast'
 			AND chat_jid NOT LIKE '%@newsletter'
-			LIMIT 10000`, ourJID).Scan(&secretRows)
+			ORDER BY rowid DESC LIMIT 10000`, ourJID).Scan(&secretRows)
 		for _, row := range secretRows {
 			for _, jidStr := range []string{row.ChatJid, row.SenderJid} {
 				if jidStr == "" {
