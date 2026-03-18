@@ -17,12 +17,9 @@ export const useAuth = () => {
     }
 
     const login = async (key: string): Promise<boolean> => {
-        const config = useRuntimeConfig()
-        const backendUrl = config.public.backendUrl
-
         try {
-            // Validate API key by making a test request
-            const response = await fetch(`${backendUrl}/api/tags`, {
+            // Validate API key via Nuxt proxy (relative URL)
+            const response = await fetch(`/api/tags`, {
                 headers: {
                     'Authorization': `Bearer ${key}`
                 }

@@ -1,10 +1,7 @@
 import { useAuth } from './useAuth'
 
-const getBackendUrl = () => {
-    const config = useRuntimeConfig()
-    // Returns empty string to use same origin (via Nitro proxy)
-    return config.public.backendUrl || ''
-}
+// Always use relative paths — Nuxt's Nitro proxy forwards /api/** to Go backend
+const getBackendUrl = () => ''
 
 const headers = () => {
     const { getApiKey } = useAuth()
@@ -38,7 +35,7 @@ export interface ApiTag {
 }
 
 export const useApi = () => {
-    const API_BASE_URL = `${getBackendUrl()}/api`
+    const API_BASE_URL = `/api`
 
     // Instances
     const fetchInstances = async (): Promise<ApiInstance[]> => {
