@@ -541,10 +541,14 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 	mediaCtx, mediaCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer mediaCancel()
 
-	// Resolve LID to real phone number for group senders.
-	// On newer multi-device accounts, Sender.User may be a privacy LID instead of a phone number.
-	if isGroup {
-		if resolved, _ := w.resolveToPhone(mediaCtx, msg.Info.Sender.String()); resolved != "" {
+	// Resolve LID to real phone number (DMs and group senders).
+	// On newer multi-device accounts, JIDs may be @lid privacy identifiers, not phone numbers.
+	{
+		jidToResolve := msg.Info.Chat.String() // for DMs, Chat is the contact's JID
+		if isGroup {
+			jidToResolve = msg.Info.Sender.String() // for groups, Sender is the member's JID
+		}
+		if resolved, _ := w.resolveToPhone(mediaCtx, jidToResolve); resolved != "" {
 			from = resolved
 			msgData.From = resolved
 		}
