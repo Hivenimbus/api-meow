@@ -520,9 +520,13 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 	from := msg.Info.Chat.User
 	if isGroup {
 		from = msg.Info.Sender.User
-	} else {
-		log.Printf("[Webhook] DM sender details — Chat.String()=%q Chat.Server=%q Chat.User=%q Sender.String()=%q",
-			msg.Info.Chat.String(), msg.Info.Chat.Server, msg.Info.Chat.User, msg.Info.Sender.String())
+	}
+
+	// If the sender uses LID addressing, SenderAlt contains the real phone number JID.
+	// When Chat.Server == "lid", whatsmeow sets SenderAlt to the "sender_pn" attribute,
+	// which is the actual phone number JID (@s.whatsapp.net).
+	if !msg.Info.SenderAlt.IsEmpty() && msg.Info.SenderAlt.Server == types.DefaultUserServer {
+		from = msg.Info.SenderAlt.User
 	}
 
 	// Build message data
@@ -543,19 +547,6 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 	// (GetGroupInfo + media downloads). Prevents goroutine leaks if CDN hangs.
 	mediaCtx, mediaCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer mediaCancel()
-
-	// Resolve LID to real phone number (DMs and group senders).
-	// On newer multi-device accounts, JIDs may be @lid privacy identifiers, not phone numbers.
-	{
-		jidToResolve := msg.Info.Chat.String() // for DMs, Chat is the contact's JID
-		if isGroup {
-			jidToResolve = msg.Info.Sender.String() // for groups, Sender is the member's JID
-		}
-		if resolved, _ := w.resolveToPhone(mediaCtx, jidToResolve); resolved != "" {
-			from = resolved
-			msgData.From = resolved
-		}
-	}
 
 	// Set group info if applicable
 	if isGroup {
