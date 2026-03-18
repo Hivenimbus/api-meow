@@ -1324,6 +1324,24 @@ func (w *WAClient) GetContacts(ctx context.Context) ([]ContactInfo, error) {
 	return w.FetchContacts(ctx)
 }
 
+// GetProfilePictureURL returns the profile picture URL for the given phone number.
+// Returns empty string (no error) if the contact has no picture or privacy settings block access.
+func (w *WAClient) GetProfilePictureURL(ctx context.Context, phone string) (string, error) {
+	if !w.client.IsConnected() {
+		return "", fmt.Errorf("client is not connected")
+	}
+	jid, err := types.ParseJID(phone + "@s.whatsapp.net")
+	if err != nil {
+		return "", fmt.Errorf("invalid phone number: %w", err)
+	}
+	pic, err := w.client.GetProfilePictureInfo(ctx, jid, &whatsmeow.GetProfilePictureParams{Preview: false})
+	if err != nil || pic == nil {
+		// Not critical — contact may have no photo or privacy settings block access
+		return "", nil
+	}
+	return pic.URL, nil
+}
+
 // SetPresence sets the online/offline presence for this instance
 func (w *WAClient) SetPresence(available bool) error {
 	if !w.client.IsConnected() {

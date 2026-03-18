@@ -1034,6 +1034,23 @@ func main() {
 		})
 	})
 
+	// Get contact profile picture endpoint
+	api.Get("/instances/:name/contacts/:phone/profile-picture", func(c *fiber.Ctx) error {
+		if waManager == nil {
+			return c.Status(503).JSON(fiber.Map{"error": "WhatsApp service not available"})
+		}
+
+		name := c.Params("name")
+		phone := c.Params("phone")
+
+		url, err := waManager.GetProfilePictureURL(name, phone)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{"url": url})
+	})
+
 	// Tag routes
 	api.Get("/tags", func(c *fiber.Ctx) error {
 		var tags []db.Tag

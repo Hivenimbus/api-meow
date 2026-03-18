@@ -535,6 +535,19 @@ func (m *InstanceManager) GetContacts(instanceID string) ([]ContactInfo, error) 
 	return client.GetContacts(m.ctx)
 }
 
+// GetProfilePictureURL returns the profile picture URL for the given phone number.
+func (m *InstanceManager) GetProfilePictureURL(instanceID string, phone string) (string, error) {
+	m.mu.RLock()
+	client, exists := m.clients[instanceID]
+	m.mu.RUnlock()
+
+	if !exists {
+		return "", fmt.Errorf("client not found for instance %s", instanceID)
+	}
+
+	return client.GetProfilePictureURL(m.ctx, phone)
+}
+
 // SetPresence sets the online/offline presence for the specified instance
 func (m *InstanceManager) SetPresence(instanceID string, available bool) error {
 	m.mu.RLock()
