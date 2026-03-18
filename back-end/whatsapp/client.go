@@ -541,6 +541,15 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 	mediaCtx, mediaCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer mediaCancel()
 
+	// Resolve LID to real phone number for group senders.
+	// On newer multi-device accounts, Sender.User may be a privacy LID instead of a phone number.
+	if isGroup {
+		if resolved, _ := w.resolveToPhone(mediaCtx, msg.Info.Sender.String()); resolved != "" {
+			from = resolved
+			msgData.From = resolved
+		}
+	}
+
 	// Set group info if applicable
 	if isGroup {
 		msgData.GroupID = msg.Info.Chat.User
