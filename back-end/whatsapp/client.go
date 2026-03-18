@@ -110,6 +110,13 @@ type WAClient struct {
 	// Auto-reconnect
 	reconnectFn   func()
 	autoReconnect bool
+	reconnecting  int32 // atomic: 1 = reconnect goroutine already in flight
+
+	// Connection guard: prevents two concurrent Connect() calls from both reaching client.Connect()
+	isConnecting int32 // atomic: 1 = connect in progress
+
+	// Limits concurrent processHistorySync goroutines to avoid DB contention during initial sync
+	historySyncSem chan struct{}
 
 	// Channels for events
 	QRCodeChan    chan string
@@ -136,13 +143,14 @@ func (w *WAClient) DisableAutoReconnect() {
 // NewWAClient creates a new WhatsApp client wrapper
 func NewWAClient(instanceID string, client *whatsmeow.Client, db *gorm.DB) *WAClient {
 	wac := &WAClient{
-		instanceID:    instanceID,
-		client:        client,
-		db:            db,
-		status:        "disconnected",
-		QRCodeChan:    make(chan string, 10),
-		ConnectedChan: make(chan bool, 1),
-		ErrorChan:     make(chan error, 10),
+		instanceID:     instanceID,
+		client:         client,
+		db:             db,
+		status:         "disconnected",
+		QRCodeChan:     make(chan string, 10),
+		ConnectedChan:  make(chan bool, 1),
+		ErrorChan:      make(chan error, 10),
+		historySyncSem: make(chan struct{}, 3),
 	}
 
 	// Register event handler
@@ -183,6 +191,13 @@ func (w *WAClient) Connect(ctx context.Context) error {
 	w.qrCode = ""
 	w.status = "connecting"
 	w.mu.Unlock()
+
+	// Guard: only one goroutine proceeds to the actual client.Connect() call.
+	// Others see status="connecting" on the next iteration and bail out above.
+	if !atomic.CompareAndSwapInt32(&w.isConnecting, 0, 1) {
+		return nil
+	}
+	defer atomic.StoreInt32(&w.isConnecting, 0)
 
 	// Reset history sync progress and contacts cache for new connection
 	atomic.StoreInt32(&w.historySyncProgress, 0)
@@ -295,6 +310,7 @@ func (w *WAClient) handleQRCodes(ctx context.Context, qrChan <-chan whatsmeow.QR
 func (w *WAClient) eventHandler(evt interface{}) {
 	switch v := evt.(type) {
 	case *events.Connected:
+		atomic.StoreInt32(&w.reconnecting, 0) // connection succeeded — clear reconnect guard
 		w.mu.Lock()
 		w.status = "connected"
 		w.connectedAt = time.Now() // Track connection time to filter offline messages
@@ -362,7 +378,12 @@ func (w *WAClient) eventHandler(evt interface{}) {
 		}
 
 		if shouldReconnect && reconnectFn != nil {
-			go reconnectFn()
+			if atomic.CompareAndSwapInt32(&w.reconnecting, 0, 1) {
+				go func() {
+					defer atomic.StoreInt32(&w.reconnecting, 0)
+					reconnectFn()
+				}()
+			}
 		}
 
 	case *events.LoggedOut:
@@ -407,11 +428,15 @@ func (w *WAClient) eventHandler(evt interface{}) {
 		w.ErrorChan <- fmt.Errorf("stream error: %s", v.Code)
 
 	case *events.HistorySync:
-		go w.processHistorySync(v)
+		go func(ev *events.HistorySync) {
+			w.historySyncSem <- struct{}{}
+			defer func() { <-w.historySyncSem }()
+			w.processHistorySync(ev)
+		}(v)
 
 	case *events.Message:
 		go w.saveInteractionJID(v)
-		w.handleIncomingMessage(v)
+		go w.handleIncomingMessage(v)
 	}
 }
 
@@ -473,11 +498,16 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 		msgData.FromName = msg.Info.PushName
 	}
 
+	// Single context with timeout shared by all network operations in this handler
+	// (GetGroupInfo + media downloads). Prevents goroutine leaks if CDN hangs.
+	mediaCtx, mediaCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer mediaCancel()
+
 	// Set group info if applicable
 	if isGroup {
 		msgData.GroupID = msg.Info.Chat.User
 		// Try to get group name from store
-		if groupInfo, err := w.client.GetGroupInfo(context.Background(), msg.Info.Chat); err == nil {
+		if groupInfo, err := w.client.GetGroupInfo(mediaCtx, msg.Info.Chat); err == nil {
 			msgData.GroupName = groupInfo.Name
 		}
 	}
@@ -505,7 +535,7 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 			msgData.MimeType = *message.ImageMessage.Mimetype
 		}
 		// Download and encode image as base64
-		if data, err := w.client.Download(context.Background(), message.ImageMessage); err == nil {
+		if data, err := w.client.Download(mediaCtx, message.ImageMessage); err == nil {
 			msgData.MediaBase64 = base64.StdEncoding.EncodeToString(data)
 		}
 	} else if message.VideoMessage != nil {
@@ -517,7 +547,7 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 			msgData.MimeType = *message.VideoMessage.Mimetype
 		}
 		// Download and encode video as base64
-		if data, err := w.client.Download(context.Background(), message.VideoMessage); err == nil {
+		if data, err := w.client.Download(mediaCtx, message.VideoMessage); err == nil {
 			msgData.MediaBase64 = base64.StdEncoding.EncodeToString(data)
 		}
 	} else if message.AudioMessage != nil {
@@ -526,7 +556,7 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 			msgData.MimeType = *message.AudioMessage.Mimetype
 		}
 		// Download and encode audio as base64
-		if data, err := w.client.Download(context.Background(), message.AudioMessage); err == nil {
+		if data, err := w.client.Download(mediaCtx, message.AudioMessage); err == nil {
 			msgData.MediaBase64 = base64.StdEncoding.EncodeToString(data)
 		}
 	} else if message.DocumentMessage != nil {
@@ -541,7 +571,7 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 			msgData.FileName = *message.DocumentMessage.FileName
 		}
 		// Download and encode document as base64
-		if data, err := w.client.Download(context.Background(), message.DocumentMessage); err == nil {
+		if data, err := w.client.Download(mediaCtx, message.DocumentMessage); err == nil {
 			msgData.MediaBase64 = base64.StdEncoding.EncodeToString(data)
 		}
 	} else if message.StickerMessage != nil {
@@ -550,7 +580,7 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 			msgData.MimeType = *message.StickerMessage.Mimetype
 		}
 		// Download and encode sticker as base64
-		if data, err := w.client.Download(context.Background(), message.StickerMessage); err == nil {
+		if data, err := w.client.Download(mediaCtx, message.StickerMessage); err == nil {
 			msgData.MediaBase64 = base64.StdEncoding.EncodeToString(data)
 		}
 	} else if message.ContactMessage != nil {

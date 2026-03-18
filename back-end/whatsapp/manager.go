@@ -17,12 +17,13 @@ import (
 
 // InstanceManager manages multiple WhatsApp client instances
 type InstanceManager struct {
-	container *sqlstore.Container
-	clients   map[string]*WAClient
-	db        *gorm.DB
-	mu        sync.RWMutex
-	log       waLog.Logger
-	ctx       context.Context
+	container    *sqlstore.Container
+	clients      map[string]*WAClient
+	reconnecting map[string]bool // instances with an active reconnect goroutine in flight
+	db           *gorm.DB
+	mu           sync.RWMutex
+	log          waLog.Logger
+	ctx          context.Context
 }
 
 func init() {
@@ -76,11 +77,12 @@ func NewInstanceManager(dbURL string, db *gorm.DB) (*InstanceManager, error) {
 	log.Infof("WhatsApp store initialized successfully")
 
 	manager := &InstanceManager{
-		container: container,
-		clients:   make(map[string]*WAClient),
-		db:        db,
-		log:       log,
-		ctx:       ctx,
+		container:    container,
+		clients:      make(map[string]*WAClient),
+		reconnecting: make(map[string]bool),
+		db:           db,
+		log:          log,
+		ctx:          ctx,
 	}
 
 	return manager, nil
@@ -285,6 +287,7 @@ func (m *InstanceManager) Disconnect(instanceID string) error {
 		return nil
 	}
 
+	client.DisableAutoReconnect()
 	client.Disconnect()
 
 	// Remove client from memory to ensure clean state on reconnection
@@ -348,6 +351,23 @@ func (m *InstanceManager) HasClient(instanceID string) bool {
 	defer m.mu.RUnlock()
 	_, exists := m.clients[instanceID]
 	return exists
+}
+
+// IsReconnecting returns true if a reconnect attempt is already in flight for this instance.
+func (m *InstanceManager) IsReconnecting(instanceID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.reconnecting[instanceID]
+}
+
+func (m *InstanceManager) setReconnecting(instanceID string, v bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if v {
+		m.reconnecting[instanceID] = true
+	} else {
+		delete(m.reconnecting, instanceID)
+	}
 }
 
 // GetStatus returns the connection status for an instance
@@ -452,6 +472,9 @@ func (m *InstanceManager) ConnectWithPhone(instanceID, phoneNumber string) (*WAC
 		return client, nil
 	}
 	m.mu.RUnlock()
+
+	m.setReconnecting(instanceID, true)
+	defer m.setReconnecting(instanceID, false)
 
 	// Scan all devices to find the one matching the phone number.
 	// Devices are stored with AD JIDs (e.g. "5511999:12@s.whatsapp.net"), so we can't

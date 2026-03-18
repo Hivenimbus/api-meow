@@ -8,9 +8,12 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"math/rand"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"api-meow/internal/db"
@@ -34,15 +37,24 @@ var httpClient = &http.Client{Timeout: 30 * time.Second}
 func scheduleReconnect(instanceName string) {
 	delays := []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second, 60 * time.Second, 2 * time.Minute}
 	for i, delay := range delays {
-		log.Printf("[AutoReconnect] Waiting %v before attempt %d/%d for instance %s", delay, i+1, len(delays), instanceName)
-		time.Sleep(delay)
+		// Add ±2s jitter so multiple instances don't reconnect in the exact same second
+		jitter := time.Duration(rand.Int63n(4)-2) * time.Second
+		wait := delay + jitter
+		log.Printf("[AutoReconnect] Waiting %v before attempt %d/%d for instance %s", wait, i+1, len(delays), instanceName)
+		time.Sleep(wait)
 
 		if waManager == nil {
 			return
 		}
-		if _, err := waManager.GetClient(instanceName); err != nil {
-			log.Printf("[AutoReconnect] Instance %s no longer exists, stopping", instanceName)
-			return
+
+		// Check the DB — not GetClient, which would silently create an empty device.
+		if gormDB != nil {
+			var count int64
+			gormDB.Model(&db.Instance{}).Where("name = ?", instanceName).Count(&count)
+			if count == 0 {
+				log.Printf("[AutoReconnect] Instance %s no longer exists in DB, stopping", instanceName)
+				return
+			}
 		}
 
 		log.Printf("[AutoReconnect] Attempt %d/%d for instance %s", i+1, len(delays), instanceName)
@@ -103,17 +115,14 @@ func main() {
 		log.Printf("Warning: Failed to initialize WhatsApp manager: %v", err)
 		waManager = nil
 	} else {
-		defer waManager.Close()
 		log.Println("WhatsApp manager initialized successfully")
 
-		// Restore and auto-reconnect instances that were connected before restart
-		go func() {
-			var connectedInstances []db.Instance
-			if err := gormDB.Where("status = ?", "connected").Find(&connectedInstances).Error; err != nil {
-				log.Printf("Warning: Failed to get connected instances: %v", err)
-				return
-			}
-
+		// Restore clients synchronously so the in-memory map is fully populated
+		// before the HTTP server begins accepting requests.
+		var connectedInstances []db.Instance
+		if err := gormDB.Where("status = ?", "connected").Find(&connectedInstances).Error; err != nil {
+			log.Printf("Warning: Failed to get connected instances: %v", err)
+		} else {
 			var instanceInfos []whatsapp.InstanceInfo
 			for _, inst := range connectedInstances {
 				if inst.PhoneNumber != nil && *inst.PhoneNumber != "" {
@@ -136,28 +145,32 @@ func main() {
 
 			waManager.RestoreClients(instanceInfos)
 
-			var wg sync.WaitGroup
-			for _, inst := range instanceInfos {
-				wg.Add(1)
-				go func(instanceName string) {
-					defer wg.Done()
-					log.Printf("Auto-reconnecting instance: %s", instanceName)
-					client, err := waManager.Connect(context.Background(), instanceName)
-					if err != nil {
-						log.Printf("Failed to auto-reconnect instance %s: %v", instanceName, err)
-						gormDB.Model(&db.Instance{}).Where("name = ?", instanceName).Updates(map[string]interface{}{
-							"status": "disconnected",
-						})
-					} else {
-						log.Printf("Successfully auto-reconnected instance: %s", instanceName)
-						instName := instanceName
-						client.SetReconnectFunc(func() { scheduleReconnect(instName) })
-					}
-				}(inst.Name)
-			}
-			wg.Wait()
-			log.Printf("All instances reconnection completed")
-		}()
+			// Reconnect attempts are async — connecting to WhatsApp takes time and
+			// should not block the HTTP server from starting.
+			go func(infos []whatsapp.InstanceInfo) {
+				var wg sync.WaitGroup
+				for _, inst := range infos {
+					wg.Add(1)
+					go func(instanceName string) {
+						defer wg.Done()
+						log.Printf("Auto-reconnecting instance: %s", instanceName)
+						client, err := waManager.Connect(context.Background(), instanceName)
+						if err != nil {
+							log.Printf("Failed to auto-reconnect instance %s: %v", instanceName, err)
+							gormDB.Model(&db.Instance{}).Where("name = ?", instanceName).Updates(map[string]interface{}{
+								"status": "disconnected",
+							})
+						} else {
+							log.Printf("Successfully auto-reconnected instance: %s", instanceName)
+							instName := instanceName
+							client.SetReconnectFunc(func() { scheduleReconnect(instName) })
+						}
+					}(inst.Name)
+				}
+				wg.Wait()
+				log.Printf("All instances reconnection completed")
+			}(instanceInfos)
+		}
 	}
 
 	app := fiber.New(fiber.Config{
@@ -181,6 +194,14 @@ func main() {
 
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.SendString("API Meow - WhatsApp API Backend")
+	})
+
+	app.Get("/health", func(c *fiber.Ctx) error {
+		status := "ok"
+		if waManager == nil {
+			status = "degraded"
+		}
+		return c.JSON(fiber.Map{"status": status})
 	})
 
 	api := app.Group("/api", authMiddleware)
@@ -517,7 +538,7 @@ func main() {
 					}
 				}
 			}
-		} else if status == "disconnected" && phone == "" && !waManager.HasClient(name) {
+		} else if status == "disconnected" && phone == "" && !waManager.HasClient(name) && !waManager.IsReconnecting(name) {
 			// Client not in memory (e.g., server restart) — check if there's a saved session to auto-reconnect
 			var instance db.Instance
 			if gormDB.WithContext(c.Context()).
@@ -556,8 +577,12 @@ func main() {
 
 		name := c.Params("name")
 
-		if c2, e := waManager.GetClient(name); e == nil {
-			c2.DisableAutoReconnect()
+		// Use HasClient to avoid GetClient creating an empty device store for a
+		// non-existent client, which would leave an orphaned row in whatsmeow_device.
+		if waManager.HasClient(name) {
+			if c2, e := waManager.GetClient(name); e == nil {
+				c2.DisableAutoReconnect()
+			}
 		}
 		err := waManager.Disconnect(name)
 		if err != nil {
@@ -1112,8 +1137,24 @@ func main() {
 		return c.SendStatus(204)
 	})
 
+	// Graceful shutdown: listen for SIGTERM/SIGINT before blocking on app.Listen.
+	// log.Fatal would call os.Exit(1) and skip all defers (including waManager.Close()),
+	// so we handle shutdown explicitly instead.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-quit
+		log.Println("Shutdown signal received, closing connections...")
+		if waManager != nil {
+			waManager.Close()
+		}
+		_ = app.Shutdown()
+	}()
+
 	log.Println("Server starting on port 8080...")
-	log.Fatal(app.Listen(":8080"))
+	if err := app.Listen(":8080"); err != nil {
+		log.Printf("Server stopped: %v", err)
+	}
 }
 
 func authMiddleware(c *fiber.Ctx) error {

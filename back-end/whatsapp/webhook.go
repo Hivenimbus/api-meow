@@ -46,10 +46,16 @@ type StatusData struct {
 	Reason      string `json:"reason,omitempty"`
 }
 
+// maxConcurrentWebhooks is the maximum number of outgoing webhook calls that can
+// run simultaneously. Keeping this bounded prevents goroutine accumulation when
+// a webhook endpoint is slow or unreachable.
+const maxConcurrentWebhooks = 50
+
 // WebhookSender handles sending events to webhooks
 type WebhookSender struct {
-	client  *http.Client
-	timeout time.Duration
+	client    *http.Client
+	timeout   time.Duration
+	semaphore chan struct{} // limits concurrent outgoing webhook goroutines
 }
 
 // NewWebhookSender creates a new webhook sender
@@ -65,7 +71,8 @@ func NewWebhookSender() *WebhookSender {
 			Timeout:   10 * time.Second,
 			Transport: transport,
 		},
-		timeout: 10 * time.Second,
+		timeout:   10 * time.Second,
+		semaphore: make(chan struct{}, maxConcurrentWebhooks),
 	}
 }
 
@@ -102,15 +109,32 @@ func (ws *WebhookSender) SendEvent(ctx context.Context, webhookURL string, event
 	return nil
 }
 
-// SendEventAsync sends an event asynchronously (fire and forget with logging)
+// SendEventAsync sends an event asynchronously with bounded concurrency.
+// If the semaphore is full (maxConcurrentWebhooks goroutines already running),
+// the event is dropped and a warning is logged instead of spawning a new goroutine.
 func (ws *WebhookSender) SendEventAsync(webhookURL string, event WebhookEvent) {
+	if webhookURL == "" {
+		return
+	}
+
+	select {
+	case ws.semaphore <- struct{}{}:
+		// slot acquired — proceed
+	default:
+		log.Printf("[Webhook] Dropping event %s for instance %s: %d concurrent webhook calls already in flight",
+			event.Event, event.Instance, maxConcurrentWebhooks)
+		return
+	}
+
 	go func() {
+		defer func() { <-ws.semaphore }()
+
 		ctx, cancel := context.WithTimeout(context.Background(), ws.timeout)
 		defer cancel()
 
 		if err := ws.SendEvent(ctx, webhookURL, event); err != nil {
 			log.Printf("[Webhook] Error sending event %s for instance %s: %v", event.Event, event.Instance, err)
-		} else if webhookURL != "" {
+		} else {
 			log.Printf("[Webhook] Event %s sent for instance %s", event.Event, event.Instance)
 		}
 	}()
