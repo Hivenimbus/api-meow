@@ -119,6 +119,11 @@ type WAClient struct {
 	// status update, keeping "connected" in the DB for the next container to restore.
 	shuttingDown int32 // atomic
 
+	// Set to 1 when the session is replaced by another connection (rolling deploy or
+	// another device connecting). Prevents the old connection from fighting back and
+	// kicking the new connection in a reconnect loop.
+	streamReplaced int32 // atomic
+
 	// Limits concurrent processHistorySync goroutines to avoid DB contention during initial sync
 	historySyncSem chan struct{}
 
@@ -321,7 +326,8 @@ func (w *WAClient) handleQRCodes(ctx context.Context, qrChan <-chan whatsmeow.QR
 func (w *WAClient) eventHandler(evt interface{}) {
 	switch v := evt.(type) {
 	case *events.Connected:
-		atomic.StoreInt32(&w.reconnecting, 0) // connection succeeded — clear reconnect guard
+		atomic.StoreInt32(&w.reconnecting, 0)   // connection succeeded — clear reconnect guard
+		atomic.StoreInt32(&w.streamReplaced, 0) // clear replaced flag in case we reconnected after replacement
 		w.mu.Lock()
 		w.status = "connected"
 		w.connectedAt = time.Now() // Track connection time to filter offline messages
@@ -399,7 +405,12 @@ func (w *WAClient) eventHandler(evt interface{}) {
 			})
 		}
 
-		if shouldReconnect && reconnectFn != nil {
+		// Don't reconnect during graceful shutdown or when the session was intentionally
+		// replaced by another connection (e.g. rolling deploy starting a new container).
+		// Without these guards the old container fights the new one in a reconnect loop.
+		if shouldReconnect && reconnectFn != nil &&
+			atomic.LoadInt32(&w.shuttingDown) == 0 &&
+			atomic.LoadInt32(&w.streamReplaced) == 0 {
 			if atomic.CompareAndSwapInt32(&w.reconnecting, 0, 1) {
 				go func() {
 					defer atomic.StoreInt32(&w.reconnecting, 0)
@@ -447,6 +458,11 @@ func (w *WAClient) eventHandler(evt interface{}) {
 		w.mu.Unlock()
 
 	case *events.StreamError:
+		if v.Code == "replaced" {
+			// Session was taken over by another connection (rolling deploy / another device).
+			// Mark the flag so the subsequent Disconnected event won't trigger a reconnect.
+			atomic.StoreInt32(&w.streamReplaced, 1)
+		}
 		w.ErrorChan <- fmt.Errorf("stream error: %s", v.Code)
 
 	case *events.HistorySync:
