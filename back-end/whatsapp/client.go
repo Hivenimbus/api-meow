@@ -115,6 +115,10 @@ type WAClient struct {
 	// Connection guard: prevents two concurrent Connect() calls from both reaching client.Connect()
 	isConnecting int32 // atomic: 1 = connect in progress
 
+	// Set to 1 during graceful shutdown so the Disconnected event handler skips the DB
+	// status update, keeping "connected" in the DB for the next container to restore.
+	shuttingDown int32 // atomic
+
 	// Limits concurrent processHistorySync goroutines to avoid DB contention during initial sync
 	historySyncSem chan struct{}
 
@@ -130,6 +134,13 @@ func (w *WAClient) SetReconnectFunc(fn func()) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.reconnectFn = fn
+}
+
+// SetShuttingDown marks the client as being closed due to a graceful shutdown.
+// This prevents the Disconnected event handler from writing "disconnected" to the DB,
+// so the next container can find the instance and reconnect it.
+func (w *WAClient) SetShuttingDown() {
+	atomic.StoreInt32(&w.shuttingDown, 1)
 }
 
 // DisableAutoReconnect prevents the client from reconnecting after a disconnect.
@@ -318,11 +329,21 @@ func (w *WAClient) eventHandler(evt interface{}) {
 		if w.client.Store.ID != nil {
 			w.phone = w.client.Store.ID.User
 		}
+		phone := w.phone
 		webhookURL := w.webhookURL
 		if w.reconnectFn != nil {
 			w.autoReconnect = true
 		}
 		w.mu.Unlock()
+
+		// Persist connected status so the next container restart can restore this session.
+		// This also covers the auto-reconnect case where status was "disconnected" in DB.
+		if w.db != nil && phone != "" {
+			w.db.Model(&db.Instance{}).Where("name = ?", w.instanceID).Updates(map[string]interface{}{
+				"status":       "connected",
+				"phone_number": phone,
+			})
+		}
 
 		select {
 		case w.ConnectedChan <- true:
@@ -358,8 +379,9 @@ func (w *WAClient) eventHandler(evt interface{}) {
 		reconnectFn := w.reconnectFn
 		w.mu.Unlock()
 
-		// Persist disconnected status to DB
-		if w.db != nil {
+		// Persist disconnected status to DB — but skip during graceful shutdown so the
+		// next container can find the instance (status stays "connected") and reconnect it.
+		if w.db != nil && atomic.LoadInt32(&w.shuttingDown) == 0 {
 			w.db.Model(&db.Instance{}).Where("name = ?", w.instanceID).Updates(map[string]interface{}{
 				"status": "disconnected",
 			})

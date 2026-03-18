@@ -390,6 +390,7 @@ func (m *InstanceManager) Close() {
 	defer m.mu.Unlock()
 
 	for _, client := range m.clients {
+		client.SetShuttingDown()
 		client.Disconnect()
 	}
 
