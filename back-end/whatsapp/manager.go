@@ -316,22 +316,6 @@ func (m *InstanceManager) RemoveClient(instanceID string) {
 		delete(m.clients, instanceID)
 	}
 
-	// Additionally, clean up ALL orphaned devices from the database
-	// This handles cases where the client was never in memory (e.g., after restart)
-	devices, err := m.container.GetAllDevices(m.ctx)
-	if err != nil {
-		m.log.Errorf("Failed to get devices for cleanup: %v", err)
-		return
-	}
-
-	for _, device := range devices {
-		err := device.Delete(m.ctx)
-		if err != nil {
-			m.log.Errorf("Failed to delete orphaned device %v: %v", device.ID, err)
-		} else {
-			m.log.Infof("Deleted orphaned device %v", device.ID)
-		}
-	}
 }
 
 // GetQRCode returns the current QR code for an instance (base64 encoded)
