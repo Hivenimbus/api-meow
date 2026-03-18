@@ -520,6 +520,9 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 	from := msg.Info.Chat.User
 	if isGroup {
 		from = msg.Info.Sender.User
+	} else {
+		log.Printf("[Webhook] DM sender details — Chat.String()=%q Chat.Server=%q Chat.User=%q Sender.String()=%q",
+			msg.Info.Chat.String(), msg.Info.Chat.Server, msg.Info.Chat.User, msg.Info.Sender.String())
 	}
 
 	// Build message data
@@ -1334,7 +1337,7 @@ func (w *WAClient) FetchContacts(ctx context.Context) ([]ContactInfo, error) {
 			AND chat_jid NOT LIKE '%@g.us'
 			AND chat_jid NOT LIKE '%@broadcast'
 			AND chat_jid NOT LIKE '%@newsletter'
-			ORDER BY rowid DESC LIMIT 10000`, ourJID).Scan(&secretRows)
+			LIMIT 10000`, ourJID).Scan(&secretRows)
 		for _, row := range secretRows {
 			for _, jidStr := range []string{row.ChatJid, row.SenderJid} {
 				if jidStr == "" {
