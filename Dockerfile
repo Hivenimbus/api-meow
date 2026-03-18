@@ -61,9 +61,10 @@ COPY back-end/sql/schema/unified_schema.sql ./migrations/schema.sql
 # Create a startup script that runs migrations before starting services.
 # Both processes run in background so the shell (PID 1) can trap SIGTERM and
 # forward it to both — guaranteeing the Go binary gets a clean shutdown signal.
+# NOTE: no "set -e" — we don't want the shell to exit if Node.js crashes.
+# The container lifecycle is driven by the Go backend (critical service).
 RUN cat > /app/start.sh << 'EOF'
 #!/bin/sh
-set -e
 
 echo "Starting API Meow..."
 
@@ -82,16 +83,21 @@ echo "Starting Go backend on port 8080..."
 ./api-meow &
 GO_PID=$!
 
-echo "Starting Nuxt frontend on port 3000..."
+echo "Starting Nuxt frontend..."
 node .output/server/index.mjs &
 NODE_PID=$!
 
 # Forward SIGTERM/INT to both processes so the Go binary performs graceful
 # shutdown (closes WhatsApp connections cleanly and preserves session state).
-trap 'echo "Shutdown signal received, stopping services..."; kill -TERM $GO_PID $NODE_PID' TERM INT
+trap 'echo "Shutdown signal received, stopping services..."; kill -TERM $GO_PID $NODE_PID 2>/dev/null' TERM INT
 
-# Wait for both processes to exit before the container stops
-wait $GO_PID $NODE_PID
+# Container lifecycle is tied to the Go backend only.
+# If Nuxt crashes, the Go API keeps serving and EasyPanel won't restart the
+# container unnecessarily. If Go exits (crash or SIGTERM), the container stops.
+wait $GO_PID
+echo "Go backend stopped, shutting down..."
+kill -TERM $NODE_PID 2>/dev/null
+wait $NODE_PID 2>/dev/null
 EOF
 RUN chmod +x /app/start.sh
 
