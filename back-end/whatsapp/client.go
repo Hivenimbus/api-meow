@@ -527,10 +527,6 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 	// which is the actual phone number JID (@s.whatsapp.net).
 	if !msg.Info.SenderAlt.IsEmpty() && msg.Info.SenderAlt.Server == types.DefaultUserServer {
 		from = msg.Info.SenderAlt.User
-	} else if msg.Info.SenderAlt.IsEmpty() && (msg.Info.Chat.Server == types.HiddenUserServer || msg.Info.Chat.Server == types.HostedLIDServer) {
-		// SenderAlt is empty and the chat is a LID JID — WhatsApp didn't include sender_pn.
-		// Use the full LID JID string so the client can use LID addressing to send replies.
-		from = msg.Info.Chat.String() // e.g. "237559137448078@lid"
 	}
 
 	// Build message data
