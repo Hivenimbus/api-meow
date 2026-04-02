@@ -104,6 +104,14 @@ func main() {
 		sqlDB.SetConnMaxLifetime(5 * time.Minute)
 	}
 
+	// GORM AutoMigrate tries to DROP CONSTRAINT "uni_instances_name" without IF EXISTS.
+	// Ensure it exists first so the DROP succeeds; if the table doesn't exist yet,
+	// or the constraint already exists, do nothing.
+	gormDB.Exec(`DO $$ BEGIN
+		ALTER TABLE instances ADD CONSTRAINT "uni_instances_name" UNIQUE (name);
+	EXCEPTION WHEN undefined_table OR duplicate_object THEN NULL;
+	END $$`)
+
 	// Create/update tables automatically
 	if err := gormDB.AutoMigrate(&db.Instance{}, &db.Tag{}); err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
@@ -174,6 +182,7 @@ func main() {
 	}
 
 	app := fiber.New(fiber.Config{
+		ReadBufferSize: 16384,
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			log.Printf("Error: %v", err)
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
