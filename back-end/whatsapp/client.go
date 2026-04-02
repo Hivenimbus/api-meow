@@ -542,26 +542,34 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 				}
 			}
 		} else {
-			// For DMs in LID mode: RecipientAlt has the PN of the other party,
-			// but when the message is incoming (!IsFromMe), the sender is the Chat partner.
-			// SenderAlt has the sender's PN.
-			if !msg.Info.SenderAlt.IsEmpty() && msg.Info.SenderAlt.Server == types.DefaultUserServer {
-				from = msg.Info.SenderAlt.User
-				// For incoming DMs in LID mode, Chat holds the other party's LID JID.
-				if w.client.Store != nil && !msg.Info.Chat.IsEmpty() &&
-					msg.Info.Chat.Server == types.HiddenUserServer {
-					lidJID := msg.Info.Chat.ToNonAD()
-					pnJID := msg.Info.SenderAlt.ToNonAD()
-					go func() {
-						ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-						defer cancel()
-						if err := w.client.Store.LIDs.PutLIDMapping(ctx, lidJID, pnJID); err != nil {
-							log.Printf("[LID] failed to persist DM sender mapping %s→%s: %v", lidJID, pnJID, err)
-						}
-					}()
+			// DMs in LID mode: behavior differs between incoming and outgoing echoes.
+			if !msg.Info.IsFromMe {
+				// INCOMING: SenderAlt = sender's PN; Chat = sender's LID.
+				// whatsmeow already calls StoreLIDPNMapping(SenderAlt, Sender) before dispatching.
+				if !msg.Info.SenderAlt.IsEmpty() && msg.Info.SenderAlt.Server == types.DefaultUserServer {
+					from = msg.Info.SenderAlt.User
 				}
-			} else if !msg.Info.RecipientAlt.IsEmpty() && msg.Info.RecipientAlt.Server == types.DefaultUserServer {
-				from = msg.Info.RecipientAlt.User
+				// Note: RecipientAlt for incoming DMs = our own PN — do NOT use as "from".
+			} else {
+				// OUTGOING ECHO: Chat = recipient's LID; RecipientAlt = recipient's PN.
+				// whatsmeow only stores SenderAlt (our PN) → our LID and never reaches the RecipientAlt
+				// branch (see whatsmeow message.go:48-51). We fill the gap so that future incoming
+				// messages from this LID can be resolved to a phone number.
+				if !msg.Info.Chat.IsEmpty() && msg.Info.Chat.Server == types.HiddenUserServer &&
+					!msg.Info.RecipientAlt.IsEmpty() && msg.Info.RecipientAlt.Server == types.DefaultUserServer {
+					from = msg.Info.RecipientAlt.User
+					if w.client.Store != nil {
+						lidJID := msg.Info.Chat.ToNonAD()
+						pnJID := msg.Info.RecipientAlt.ToNonAD()
+						go func() {
+							ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+							defer cancel()
+							if err := w.client.Store.LIDs.PutLIDMapping(ctx, lidJID, pnJID); err != nil {
+								log.Printf("[LID] failed to persist outgoing DM recipient mapping %s→%s: %v", lidJID, pnJID, err)
+							}
+						}()
+					}
+				}
 			}
 		}
 	}
