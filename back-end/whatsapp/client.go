@@ -515,11 +515,26 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 		return
 	}
 
-	// For DMs, use Chat.User (always the phone number).
-	// Sender.User may be a privacy LID on newer WhatsApp multi-device accounts.
-	from := msg.Info.Chat.User
+	// Determine the raw "from" JID string.
+	// For DMs use Chat (the conversation partner); for groups use Sender (the individual).
+	rawFrom := msg.Info.Chat.String()
 	if isGroup {
-		from = msg.Info.Sender.User
+		rawFrom = msg.Info.Sender.String()
+	}
+
+	// Resolve LID → phone number. On newer WhatsApp multi-device accounts the JID
+	// may be a privacy LID (e.g. "21195697164501@lid") instead of a phone number.
+	// resolveToPhone handles both regular JIDs and LIDs transparently.
+	resolveCtx, resolveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer resolveCancel()
+	from, _ := w.resolveToPhone(resolveCtx, rawFrom)
+	if from == "" {
+		// Fallback: use the raw User part if no mapping is available
+		if isGroup {
+			from = msg.Info.Sender.User
+		} else {
+			from = msg.Info.Chat.User
+		}
 	}
 
 	// Build message data
