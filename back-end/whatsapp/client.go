@@ -486,8 +486,10 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 	connectedAt := w.connectedAt
 	w.mu.RUnlock()
 
-	log.Printf("[Webhook] Message received for instance %s: from=%s type=%s webhookURL=%q",
-		w.instanceID, msg.Info.Sender.User, msg.Info.Chat.Server, webhookURL)
+	log.Printf("[Webhook] Message received for instance %s: chat=%s sender=%s addrMode=%s senderAlt=%s recipientAlt=%s type=%s webhookURL=%q",
+		w.instanceID, msg.Info.Chat.String(), msg.Info.Sender.String(),
+		msg.Info.AddressingMode, msg.Info.SenderAlt.String(), msg.Info.RecipientAlt.String(),
+		msg.Info.Chat.Server, webhookURL)
 
 	// Skip if no webhook configured
 	if webhookURL == "" {
@@ -515,21 +517,42 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 		return
 	}
 
-	// Determine the raw "from" JID string.
-	// For DMs use Chat (the conversation partner); for groups use Sender (the individual).
-	rawFrom := msg.Info.Chat.String()
-	if isGroup {
-		rawFrom = msg.Info.Sender.String()
+	// Determine the "from" phone number.
+	// WhatsApp may address messages via LID (Linked Identity) instead of phone number.
+	// When AddressingMode == "lid", Chat/Sender contain LIDs, but SenderAlt/RecipientAlt
+	// may carry the real phone number JID.
+	var from string
+	if msg.Info.AddressingMode == types.AddressingModeLID {
+		// LID-addressed message: try alt fields first (they contain the PN JID)
+		if isGroup {
+			if !msg.Info.SenderAlt.IsEmpty() && msg.Info.SenderAlt.Server == types.DefaultUserServer {
+				from = msg.Info.SenderAlt.User
+			}
+		} else {
+			// For DMs in LID mode: RecipientAlt has the PN of the other party,
+			// but when the message is incoming (!IsFromMe), the sender is the Chat partner.
+			// SenderAlt has the sender's PN.
+			if !msg.Info.SenderAlt.IsEmpty() && msg.Info.SenderAlt.Server == types.DefaultUserServer {
+				from = msg.Info.SenderAlt.User
+			} else if !msg.Info.RecipientAlt.IsEmpty() && msg.Info.RecipientAlt.Server == types.DefaultUserServer {
+				from = msg.Info.RecipientAlt.User
+			}
+		}
 	}
 
-	// Resolve LID → phone number. On newer WhatsApp multi-device accounts the JID
-	// may be a privacy LID (e.g. "21195697164501@lid") instead of a phone number.
-	// resolveToPhone handles both regular JIDs and LIDs transparently.
-	resolveCtx, resolveCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer resolveCancel()
-	from, _ := w.resolveToPhone(resolveCtx, rawFrom)
+	// If alt fields didn't provide a PN, try the LID store mapping
 	if from == "" {
-		// Fallback: use the raw User part if no mapping is available
+		rawFrom := msg.Info.Chat.String()
+		if isGroup {
+			rawFrom = msg.Info.Sender.String()
+		}
+		resolveCtx, resolveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		from, _ = w.resolveToPhone(resolveCtx, rawFrom)
+		resolveCancel()
+	}
+
+	// Final fallback: use the raw User part (may still be a LID number)
+	if from == "" {
 		if isGroup {
 			from = msg.Info.Sender.User
 		} else {
