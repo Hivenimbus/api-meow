@@ -522,6 +522,19 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 		from = msg.Info.Sender.User
 	}
 
+	// Resolve LID (Linked Identity) to actual phone number (WhatsApp Business accounts).
+	fromJID := msg.Info.Chat
+	if isGroup {
+		fromJID = msg.Info.Sender
+	}
+	if fromJID.Server == types.HiddenUserServer {
+		resolveCtx, resolveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer resolveCancel()
+		if phone, _ := w.resolveToPhone(resolveCtx, fromJID.String()); phone != "" {
+			from = phone
+		}
+	}
+
 	// Build message data
 	msgData := MessageData{
 		From:      from,
