@@ -527,6 +527,19 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 		if isGroup {
 			if !msg.Info.SenderAlt.IsEmpty() && msg.Info.SenderAlt.Server == types.DefaultUserServer {
 				from = msg.Info.SenderAlt.User
+				// Persist LID→PN so future messages without alt fields resolve correctly.
+				if w.client.Store != nil && !msg.Info.Sender.IsEmpty() &&
+					msg.Info.Sender.Server == types.HiddenUserServer {
+					lidJID := msg.Info.Sender.ToNonAD()
+					pnJID := msg.Info.SenderAlt.ToNonAD()
+					go func() {
+						ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+						defer cancel()
+						if err := w.client.Store.LIDs.PutLIDMapping(ctx, lidJID, pnJID); err != nil {
+							log.Printf("[LID] failed to persist group sender mapping %s→%s: %v", lidJID, pnJID, err)
+						}
+					}()
+				}
 			}
 		} else {
 			// For DMs in LID mode: RecipientAlt has the PN of the other party,
@@ -534,6 +547,19 @@ func (w *WAClient) handleIncomingMessage(msg *events.Message) {
 			// SenderAlt has the sender's PN.
 			if !msg.Info.SenderAlt.IsEmpty() && msg.Info.SenderAlt.Server == types.DefaultUserServer {
 				from = msg.Info.SenderAlt.User
+				// For incoming DMs in LID mode, Chat holds the other party's LID JID.
+				if w.client.Store != nil && !msg.Info.Chat.IsEmpty() &&
+					msg.Info.Chat.Server == types.HiddenUserServer {
+					lidJID := msg.Info.Chat.ToNonAD()
+					pnJID := msg.Info.SenderAlt.ToNonAD()
+					go func() {
+						ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+						defer cancel()
+						if err := w.client.Store.LIDs.PutLIDMapping(ctx, lidJID, pnJID); err != nil {
+							log.Printf("[LID] failed to persist DM sender mapping %s→%s: %v", lidJID, pnJID, err)
+						}
+					}()
+				}
 			} else if !msg.Info.RecipientAlt.IsEmpty() && msg.Info.RecipientAlt.Server == types.DefaultUserServer {
 				from = msg.Info.RecipientAlt.User
 			}
